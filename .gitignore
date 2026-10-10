@@ -1,0 +1,123 @@
+# Build
+build/
+out/
+cmake-build-*/
+
+# Harnais de tests headless (tools/run_logic_tests.bat)
+build-tests/
+
+# Dependances telechargees par FetchContent
+external/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+
+# Compiles
+*.o
+*.obj
+*.exe
+*.spv
+
+# Exception : les meshes Wavefront .obj de assets/ sont des SOURCES, pas des
+# fichiers objets de compilation. La regle *.obj ci-dessus les aurait ignores
+# silencieusement.
+#
+# PHASE 15 : la regle est passee de "assets/*.obj" a TOUTE profondeur sous
+# assets/. Le motif a un seul niveau ne couvrait pas assets/editor/, le dossier
+# de modeles de l'editeur - le seul asset du catalogue qui vienne d'un fichier
+# aurait donc ete ignore en silence, exactement le piege que ce commentaire
+# decrivait deja.
+!assets/**/*.obj
+
+# Donnees LiDAR (Phase 7)
+# ----------------------
+# Les dalles brutes de l'IGN font ~170 Mo piece et sont librement
+# retelechargeables (licence ouverte Etalab 2.0) : aucune raison de les
+# versionner. Les heightmaps derivees (4 Mo au pas de 1 m) sont exclues pour la
+# meme raison - elles se regenerent en 4 secondes avec
+# tools/lidar_to_heightmap.py, dont la ligne de commande exacte est dans
+# NOTES-PHASE7.md. Le jeu se replie sur le terrain synthetique si elles manquent.
+data/
+assets/terrain/*.vchm
+
+# OS
+.DS_Store
+Thumbs.db
+
+# --- double-push : exclusions generiques (secrets, builds, binaires, gros fichiers) ---
+target/
+node_modules/
+build/
+build-*/
+dist/
+out/
+.gradle/
+.idea/
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+.cache/
+.next/
+.env
+.env.*
+!.env.example
+accounts.json
+Clee.API/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+keystore.properties
+id_rsa*
+id_ed25519*
+*.kdbx
+*.odt
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.exe
+*.dll
+*.msi
+*.jar
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.gguf
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.bin
+*.iso
+*.gws
+*.apk
+*.aab
+*.so
+*.o
+*.a
+*.lib
+*.pdb
+*.mp4
+*.mkv
+*.wav
+*.flac
+# sous-depots / donnees volumineuses exclus du premier commit
+/external/glfw-src/
+/external/glm-src/
+/external/tinyobjloader-src/

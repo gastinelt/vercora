@@ -1,0 +1,45 @@
+﻿Vulkan SDK : C:\VulkanSDK\1.4.357.0
+-- Including Win32 support
+.\tools\build.bat : CMake Warning (deprecated) at external/glm-src/CMakeLists.txt:1 (cmake_minimum_required):
+Au caractère Ligne:1 : 348
++ ... theog\Documents\_CODE\_Vercora"; .\tools\build.bat Debug 2>&1 | Tee-O ...
++                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (CMake Warning (...imum_required)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+This warning is for project developers.  Use -Wno-author or -Wno-deprecated
+to suppress it.
+
+CMake Warning (deprecated) at external/glm-src/CMakeLists.txt:2 (cmake_policy):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+This warning is for project developers.  Use -Wno-author or -Wno-deprecated
+to suppress it.
+
+-- GLM: Version 1.0.1
+-- GLM: Build with C++ features auto detection
+-- Configuring done (0.5s)
+-- Generating done (0.1s)
+-- Build files have been written to: C:/Users/theog/Documents/_CODE/_Vercora/build
+[1/4] Building CXX object CMakeFiles\vercora.dir\src\renderer\Pipeline.cpp.obj
+[2/4] Building CXX object CMakeFiles\vercora.dir\src\core\Paths.cpp.obj
+[3/4] Building CXX object CMakeFiles\vercora.dir\src\main.cpp.obj
+[4/4] Linking CXX executable vercora.exe
+FAILED: [code=4294967295] vercora.exe 
+C:\WINDOWS\system32\cmd.exe /C "cd . && "C:\Program Files\CMake\bin\cmake.exe" -E vs_link_exe --msvc-ver=1951 --intdir=CMakeFiles\vercora.dir --rc="C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe" --mt="C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\mt.exe" --manifests  -- "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\link.exe" /nologo CMakeFiles\vercora.dir\src\main.cpp.obj CMakeFiles\vercora.dir\src\core\Window.cpp.obj CMakeFiles\vercora.dir\src\core\Camera.cpp.obj CMakeFiles\vercora.dir\src\core\Paths.cpp.obj CMakeFiles\vercora.dir\src\assets\ObjLoader.cpp.obj CMakeFiles\vercora.dir\src\assets\Heightmap.cpp.obj CMakeFiles\vercora.dir\src\assets\TerrainFile.cpp.obj CMakeFiles\vercora.dir\src\assets\TextureFile.cpp.obj CMakeFiles\vercora.dir\src\world\TreeMesh.cpp.obj CMakeFiles\vercora.dir\src\world\StoneMesh.cpp.obj CMakeFiles\vercora.dir\src\world\Tree.cpp.obj CMakeFiles\vercora.dir\src\world\Ground.cpp.obj CMakeFiles\vercora.dir\src\world\Knapping.cpp.obj CMakeFiles\vercora.dir\src\world\Forest.cpp.obj CMakeFiles\vercora.dir\src\world\Habitat.cpp.obj CMakeFiles\vercora.dir\src\world\Wildlife.cpp.obj CMakeFiles\vercora.dir\src\world\AnimalMesh.cpp.obj CMakeFiles\vercora.dir\src\world\Vegetation.cpp.obj CMakeFiles\vercora.dir\src\world\GrassMesh.cpp.obj CMakeFiles\vercora.dir\src\world\Paraglider.cpp.obj CMakeFiles\vercora.dir\src\world\Bike.cpp.obj CMakeFiles\vercora.dir\src\world\Climber.cpp.obj CMakeFiles\vercora.dir\src\world\Needs.cpp.obj CMakeFiles\vercora.dir\src\world\WaterSource.cpp.obj CMakeFiles\vercora.dir\src\world\TerrainQuadtree.cpp.obj CMakeFiles\vercora.dir\src\editor\EditorAssets.cpp.obj CMakeFiles\vercora.dir\src\editor\AssetCatalog.cpp.obj CMakeFiles\vercora.dir\src\editor\EditorScene.cpp.obj CMakeFiles\vercora.dir\src\editor\EditorController.cpp.obj CMakeFiles\vercora.dir\src\editor\SceneFile.cpp.obj CMakeFiles\vercora.dir\src\renderer\VulkanContext.cpp.obj CMakeFiles\vercora.dir\src\renderer\VulkanBuffer.cpp.obj CMakeFiles\vercora.dir\src\renderer\Mesh.cpp.obj CMakeFiles\vercora.dir\src\renderer\TerrainMesh.cpp.obj CMakeFiles\vercora.dir\src\renderer\TerrainNodeMesh.cpp.obj CMakeFiles\vercora.dir\src\renderer\TerrainStreamer.cpp.obj CMakeFiles\vercora.dir\src\renderer\SwapChain.cpp.obj CMakeFiles\vercora.dir\src\renderer\Pipeline.cpp.obj CMakeFiles\vercora.dir\src\renderer\Renderer.cpp.obj CMakeFiles\vercora.dir\src\renderer\Texture.cpp.obj  /out:vercora.exe /implib:vercora.lib /pdb:vercora.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console  C:\VulkanSDK\1.4.357.0\Lib\vulkan-1.lib  C:\Users\theog\Documents\_CODE\_Vercora\external\glfw-build\src\glfw3.lib  C:\Users\theog\Documents\_CODE\_Vercora\external\glm-build\glm\glm.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+LINK Pass 1: command "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\link.exe /nologo CMakeFiles\vercora.dir\src\main.cpp.obj CMakeFiles\vercora.dir\src\core\Window.cpp.obj CMakeFiles\vercora.dir\src\core\Camera.cpp.obj CMakeFiles\vercora.dir\src\core\Paths.cpp.obj CMakeFiles\vercora.dir\src\assets\ObjLoader.cpp.obj CMakeFiles\vercora.dir\src\assets\Heightmap.cpp.obj CMakeFiles\vercora.dir\src\assets\TerrainFile.cpp.obj CMakeFiles\vercora.dir\src\assets\TextureFile.cpp.obj CMakeFiles\vercora.dir\src\world\TreeMesh.cpp.obj CMakeFiles\vercora.dir\src\world\StoneMesh.cpp.obj CMakeFiles\vercora.dir\src\world\Tree.cpp.obj CMakeFiles\vercora.dir\src\world\Ground.cpp.obj CMakeFiles\vercora.dir\src\world\Knapping.cpp.obj CMakeFiles\vercora.dir\src\world\Forest.cpp.obj CMakeFiles\vercora.dir\src\world\Habitat.cpp.obj CMakeFiles\vercora.dir\src\world\Wildlife.cpp.obj CMakeFiles\vercora.dir\src\world\AnimalMesh.cpp.obj CMakeFiles\vercora.dir\src\world\Vegetation.cpp.obj CMakeFiles\vercora.dir\src\world\GrassMesh.cpp.obj CMakeFiles\vercora.dir\src\world\Paraglider.cpp.obj CMakeFiles\vercora.dir\src\world\Bike.cpp.obj CMakeFiles\vercora.dir\src\world\Climber.cpp.obj CMakeFiles\vercora.dir\src\world\Needs.cpp.obj CMakeFiles\vercora.dir\src\world\WaterSource.cpp.obj CMakeFiles\vercora.dir\src\world\TerrainQuadtree.cpp.obj CMakeFiles\vercora.dir\src\editor\EditorAssets.cpp.obj CMakeFiles\vercora.dir\src\editor\AssetCatalog.cpp.obj CMakeFiles\vercora.dir\src\editor\EditorScene.cpp.obj CMakeFiles\vercora.dir\src\editor\EditorController.cpp.obj CMakeFiles\vercora.dir\src\editor\SceneFile.cpp.obj CMakeFiles\vercora.dir\src\renderer\VulkanContext.cpp.obj CMakeFiles\vercora.dir\src\renderer\VulkanBuffer.cpp.obj CMakeFiles\vercora.dir\src\renderer\Mesh.cpp.obj CMakeFiles\vercora.dir\src\renderer\TerrainMesh.cpp.obj CMakeFiles\vercora.dir\src\renderer\TerrainNodeMesh.cpp.obj CMakeFiles\vercora.dir\src\renderer\TerrainStreamer.cpp.obj CMakeFiles\vercora.dir\src\renderer\SwapChain.cpp.obj CMakeFiles\vercora.dir\src\renderer\Pipeline.cpp.obj CMakeFiles\vercora.dir\src\renderer\Renderer.cpp.obj CMakeFiles\vercora.dir\src\renderer\Texture.cpp.obj /out:vercora.exe /implib:vercora.lib /pdb:vercora.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console C:\VulkanSDK\1.4.357.0\Lib\vulkan-1.lib C:\Users\theog\Documents\_CODE\_Vercora\external\glfw-build\src\glfw3.lib C:\Users\theog\Documents\_CODE\_Vercora\external\glm-build\glm\glm.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\vercora.dir/intermediate.manifest CMakeFiles\vercora.dir/manifest.res" failed (exit code 1168) with the following output:
+LINK : fatal error LNK1168: impossible d'ouvrir vercora.exe pour écrire
+
+ninja: build stopped: subcommand failed.
+
+[OK] Build Debug termine : C:\Users\theog\Documents\_CODE\_Vercora\tools\..\build\vercora.exe

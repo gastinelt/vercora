@@ -1,0 +1,23 @@
+# Vercora scene v1 - scene de DEMONSTRATION de la Phase 15.
+#
+# Ecrite A LA MAIN, et c'est volontaire : le format est un format texte, il doit
+# donc etre editable sans lancer le jeu. Cette scene est ce qui le prouve, et
+# elle sert de reference visuelle a tools/shot_editor.ps1.
+#
+# Emprise : dalle LHD_0907_6440_1m.vchm. Le point de vue de reference est
+#   --start=907500,6439500 --look=-90,-8
+# c'est-a-dire regard plein NORD, legerement plongeant : les objets ci-dessous
+# sont alignes devant lui, du plus proche au plus lointain.
+#
+# object <asset> <est> <nord> <dz> <cap deg> <echelle> <solide>
+version 1
+terrain LHD_0907_6440_1m.vchm
+crs 2154
+object poteau   907499.000 6439503.500 0.000  -20.000 1.0000 1
+object cairn    907503.500 6439505.000 0.000    0.000 1.0000 1
+object rocher   907495.500 6439506.500 0.000    0.000 1.0000 1
+object bloc     907507.000 6439509.000 0.000   35.000 1.0000 1
+object octaedre 907492.000 6439510.000 1.200    0.000 1.5000 1
+object abri     907501.000 6439513.000 0.000   15.000 1.0000 0
+object rocher   907509.500 6439515.000 0.000   90.000 2.2000 1
+object cairn    907494.000 6439517.000 0.000    0.000 0.7000 1

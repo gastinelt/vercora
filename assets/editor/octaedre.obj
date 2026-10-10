@@ -1,0 +1,28 @@
+# Vercora - asset de test Phase 3 : octaedre a facettes plates
+# 6 positions / 8 normales distinctes / 8 triangles
+# Chaque position est reutilisee avec plusieurs normales : teste la
+# deduplication du loader sur le triplet (position, uv, normale).
+# Genere par tools/gen_test_meshes.ps1 - ne pas editer a la main
+o OctahedronFlat
+v 1.000000 0.000000 0.000000
+v -1.000000 0.000000 0.000000
+v 0.000000 1.000000 0.000000
+v 0.000000 -1.000000 0.000000
+v 0.000000 0.000000 1.000000
+v 0.000000 0.000000 -1.000000
+vn 0.577350 0.577350 0.577350
+vn -0.577350 0.577350 0.577350
+vn -0.577350 -0.577350 0.577350
+vn 0.577350 -0.577350 0.577350
+vn 0.577350 0.577350 -0.577350
+vn -0.577350 0.577350 -0.577350
+vn -0.577350 -0.577350 -0.577350
+vn 0.577350 -0.577350 -0.577350
+f 1//1 3//1 5//1
+f 3//2 2//2 5//2
+f 2//3 4//3 5//3
+f 4//4 1//4 5//4
+f 3//5 1//5 6//5
+f 2//6 3//6 6//6
+f 4//7 2//7 6//7
+f 1//8 4//8 6//8

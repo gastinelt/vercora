@@ -1,0 +1,24 @@
+# Vercora - scene de CONTROLE de la Phase 15, sur la zone de jeu de 25 km2.
+#
+# Elle demontre la propriete centrale du format : les coordonnees sont projetees
+# (Lambert 93) et les altitudes RELATIVES au terrain, donc la meme scene se
+# recharge au meme endroit du massif quelle que soit l'emprise ou la resolution
+# chargee. Verifie a l'image sur vercora_zone_1m.vchm ET vercora_zone_2m.vchm :
+# memes objets, memes positions a l'ecran, seul le relief fin differe.
+#
+# Elle ne porte VOLONTAIREMENT pas le nom d'auto-chargement (vercora_zone.vcsc) :
+# la zone de jeu par defaut reste vierge, cette scene ne se charge qu'a la
+# demande.
+#
+#   vercora.exe assets	errainercora_zone_1m.vchm ^
+#       --scene=assets\scenes\demo_zone25.vcsc ^
+#       --start=901500,6438500 --look=-90,-10
+version 1
+terrain vercora_zone_1m.vchm
+crs 2154
+object poteau   901499.000 6438504.000 0.000   0.000 1.0000 1
+object cairn    901503.000 6438508.000 0.000   0.000 1.0000 1
+object rocher   901495.500 6438512.000 0.000   0.000 1.0000 1
+object bloc     901506.000 6438516.000 0.000  35.000 1.0000 1
+object abri     901498.000 6438522.000 0.000  15.000 1.0000 0
+object octaedre 901509.000 6438526.000 1.200   0.000 1.5000 1

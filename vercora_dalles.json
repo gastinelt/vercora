@@ -1,0 +1,102 @@
+{
+  "LHD_FXX_0899_6439_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0899_6439_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":48783416,\"coordonnees_NW\":\"0899-6439\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0900_6440_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0900_6440_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":54299339,\"coordonnees_NW\":\"0900-6440\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0900_6439_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0900_6439_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":57663450,\"coordonnees_NW\":\"0900-6439\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0901_6440_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0901_6440_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":61276543,\"coordonnees_NW\":\"0901-6440\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0901_6439_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0901_6439_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":49556671,\"coordonnees_NW\":\"0901-6439\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0902_6440_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0902_6440_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":44355425,\"coordonnees_NW\":\"0902-6440\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0902_6439_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0902_6439_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":33786578,\"coordonnees_NW\":\"0902-6439\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0903_6440_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0903_6440_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":37401731,\"coordonnees_NW\":\"0903-6440\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0903_6439_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0903_6439_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":27553875,\"coordonnees_NW\":\"0903-6439\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0903_6438_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0903_6438_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":27466020,\"coordonnees_NW\":\"0903-6438\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-13\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0903_6437_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0903_6437_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":30087369,\"coordonnees_NW\":\"0903-6437\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-13\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0902_6438_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0902_6438_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":28805280,\"coordonnees_NW\":\"0902-6438\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-13\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0902_6437_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0902_6437_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":32923291,\"coordonnees_NW\":\"0902-6437\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-13\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0901_6437_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0901_6437_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":34274581,\"coordonnees_NW\":\"0901-6437\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-13\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0902_6436_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0902_6436_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":36039337,\"coordonnees_NW\":\"0902-6436\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-13\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0903_6436_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0903_6436_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":33499214,\"coordonnees_NW\":\"0903-6436\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-13\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0901_6436_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0901_6436_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":37361899,\"coordonnees_NW\":\"0901-6436\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0900_6437_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0900_6437_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":27102569,\"coordonnees_NW\":\"0900-6437\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0899_6438_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0899_6438_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":45998310,\"coordonnees_NW\":\"0899-6438\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0900_6438_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0900_6438_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":32480771,\"coordonnees_NW\":\"0900-6438\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0901_6438_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0901_6438_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":28314762,\"coordonnees_NW\":\"0901-6438\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0899_6440_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0899_6440_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":33684325,\"coordonnees_NW\":\"0899-6440\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0899_6437_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0899_6437_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":34019250,\"coordonnees_NW\":\"0899-6437\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0899_6436_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0899_6436_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":23626468,\"coordonnees_NW\":\"0899-6436\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  },
+  "LHD_FXX_0900_6436_PTS_O_LAMB93_IGN69": {
+    "url": "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_PM_2025-03-25/LHD_FXX_0900_6436_PTS_LAMB93_IGN69.copc.laz",
+    "metadata": "{\"capteur\":[\"RIEGL VQ-780 II-S:H2223888\"],\"code_mission\":\"21LHD6PM\",\"date_edition\":\"2025-03-25\",\"nombre_points\":25613711,\"coordonnees_NW\":\"0900-6436\",\"moa_acquisition\":\"IGN\",\"moe_acquisition\":\"Sintegra\",\"procede_classement\":\"ST_AUTO_MANUEL_POST_EXP\",\"date_fin_acquisition\":\"2021-08-13\",\"systeme_altimetrique\":\"IGN69\",\"moe_classement_manuel\":\"IGN\",\"systeme_planimetrique\":\"LAMB93\",\"date_debut_acquisition\":\"2021-08-11\",\"moe_classement_automatique\":\"Avineon\"}"
+  }
+}
