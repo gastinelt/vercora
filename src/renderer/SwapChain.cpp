@@ -66,10 +66,7 @@ void SwapChain::cleanupSizeDependent() {
         vkDestroyImage(device, depthImage_, nullptr);
         depthImage_ = VK_NULL_HANDLE;
     }
-    if (depthImageMemory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(device, depthImageMemory_, nullptr);
-        depthImageMemory_ = VK_NULL_HANDLE;
-    }
+    context_.freeMemory(depthAllocation_);
 
     for (VkFramebuffer fb : framebuffers_) {
         vkDestroyFramebuffer(device, fb, nullptr);
@@ -342,16 +339,10 @@ void SwapChain::createDepthResources() {
     VkMemoryRequirements memRequirements{};
     vkGetImageMemoryRequirements(device, depthImage_, &memRequirements);
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = context_.findMemoryType(
-        memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &depthImageMemory_) != VK_SUCCESS) {
-        throw std::runtime_error("Echec de l'allocation memoire de profondeur.");
-    }
-    vkBindImageMemory(device, depthImage_, depthImageMemory_, 0);
+    // PHASE 30 : par le contexte, qui tient le compte de la memoire GPU.
+    depthAllocation_ = context_.allocateMemory(memRequirements,
+                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkBindImageMemory(device, depthImage_, depthAllocation_.memory, 0);
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;

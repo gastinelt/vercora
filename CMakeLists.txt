@@ -75,6 +75,7 @@ add_executable(vercora
   src/core/Window.cpp
   src/core/Camera.cpp
   src/core/Paths.cpp
+  src/core/ProcessMemory.cpp
   src/assets/ObjLoader.cpp
   src/assets/Heightmap.cpp
   src/assets/TerrainFile.cpp
@@ -138,12 +139,17 @@ target_link_libraries(vercora PRIVATE
 )
 
 # GLFW_INCLUDE_VULKAN : GLFW inclut les headers Vulkan automatiquement.
+# GLFW_INCLUDE_NONE : ... et PAS <GL/gl.h>, qu'il inclut sinon par defaut. Le
+#   moteur ne fait aucun OpenGL ; sous Windows l'en-tete vient avec le SDK et le
+#   defaut passait inapercu, mais sous Linux il exige les en-tetes Mesa
+#   (libgl-dev) pour rien. Les deux macros se combinent (voir glfw3.h).
 # VERCORA_DEBUG : active les validation layers uniquement en configuration Debug.
 # GLM_FORCE_RADIANS : GLM travaille en radians (evite les surprises d'unites).
 # GLM_FORCE_DEPTH_ZERO_TO_ONE : Vulkan attend une profondeur clip dans [0,1]
 #   (et non [-1,1] comme OpenGL) -> indispensable pour un depth buffer correct.
 target_compile_definitions(vercora PRIVATE
   GLFW_INCLUDE_VULKAN
+  GLFW_INCLUDE_NONE
   GLM_FORCE_RADIANS
   GLM_FORCE_DEPTH_ZERO_TO_ONE
   $<$<CONFIG:Debug>:VERCORA_DEBUG>

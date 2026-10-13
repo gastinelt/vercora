@@ -27,42 +27,38 @@ VulkanBuffer::VulkanBuffer(VulkanContext& context,
     VkMemoryRequirements memRequirements{};
     vkGetBufferMemoryRequirements(device, buffer_, &memRequirements);
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex =
-        context_.findMemoryType(memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &memory_) != VK_SUCCESS) {
-        throw std::runtime_error("Echec de l'allocation memoire d'un buffer.");
+    // PHASE 30 : par le contexte, qui tient le compte de la memoire GPU.
+    try {
+        allocation_ = context_.allocateMemory(memRequirements, properties);
+    } catch (...) {
+        vkDestroyBuffer(device, buffer_, nullptr);
+        throw;
     }
 
-    vkBindBufferMemory(device, buffer_, memory_, 0);
+    vkBindBufferMemory(device, buffer_, allocation_.memory, 0);
 }
 
 VulkanBuffer::~VulkanBuffer() {
     VkDevice device = context_.device();
     if (mapped_ != nullptr) {
-        vkUnmapMemory(device, memory_);
+        vkUnmapMemory(device, allocation_.memory);
         mapped_ = nullptr;
     }
     if (buffer_ != VK_NULL_HANDLE) {
         vkDestroyBuffer(device, buffer_, nullptr);
     }
-    if (memory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(device, memory_, nullptr);
-    }
+    context_.freeMemory(allocation_);
 }
 
 void VulkanBuffer::map() {
     if (mapped_ == nullptr) {
-        vkMapMemory(context_.device(), memory_, 0, size_, 0, &mapped_);
+        vkMapMemory(context_.device(), allocation_.memory, 0, size_, 0, &mapped_);
     }
 }
 
 void VulkanBuffer::unmap() {
     if (mapped_ != nullptr) {
-        vkUnmapMemory(context_.device(), memory_);
+        vkUnmapMemory(context_.device(), allocation_.memory);
         mapped_ = nullptr;
     }
 }

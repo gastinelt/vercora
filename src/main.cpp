@@ -11,6 +11,7 @@
 #include "editor/AssetCatalog.hpp"
 #include "editor/EditorController.hpp"
 #include "core/Paths.hpp"
+#include "core/ProcessMemory.hpp"
 #include "editor/EditorScene.hpp"
 #include "editor/PlacedObject.hpp"
 #include "editor/SceneFile.hpp"
@@ -136,6 +137,13 @@ namespace {
 // graphique, sa liste d'assets et son etat s'affichent dans le journal. Les
 // objets poses, eux, font partie du monde et sont affiches et solides dans le
 // jeu normal - c'est justement le point.
+//
+// Plus deux options de la Phase 30, pour le BANC DE MESURE (voir NOTES-PHASE30.md) :
+//   vercora.exe [scene] --quit-after=S       -> fermeture propre apres S secondes
+//                                               de boucle, bilans de fin compris
+//   vercora.exe [scene] --freeze-anim        -> horloge d'animation des shaders
+//                                               figee : images comparables au
+//                                               pixel pres d'un run a l'autre
 //
 // Le terrain synthetique n'est PAS supprime, et pour deux raisons distinctes :
 // il reste la scene de reference des tests (monde deterministe, arbres a
@@ -873,6 +881,20 @@ int main(int argc, char** argv) {
         std::string sceneFileArgument;
         std::string editorAssetsArgument;
         std::string sceneArgument;
+        // PHASE 30 : outils de BANC DE MESURE.
+        //   --quit-after=S  ferme proprement le jeu apres S secondes de boucle,
+        //                   comme une fermeture de fenetre : tous les bilans de
+        //                   fin de partie sont ecrits. Remplace le WM_CLOSE poste
+        //                   de l'exterieur, que la Phase 26 a vu arriver en retard
+        //                   sur une machine chargee.
+        //   --freeze-anim   fige l'horloge d'ANIMATION des shaders (ondulation
+        //                   de l'herbe, chute de la pluie) a zero. Avec
+        //                   --lock-input, --look et --time-scale=0, deux images
+        //                   d'une meme scene deviennent comparables au pixel pres,
+        //                   ce qui est la condition pour prouver qu'une
+        //                   optimisation ne change pas l'image.
+        float quitAfterSeconds = 0.0f;
+        bool freezeAnimation = false;
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--dump-world") {
@@ -1029,6 +1051,20 @@ int main(int argc, char** argv) {
                 }
             } else if (argument.rfind("--ortho=", 0) == 0) {
                 orthoArgument = argument.substr(std::strlen("--ortho="));
+            } else if (argument.rfind("--quit-after=", 0) == 0) {
+                try {
+                    quitAfterSeconds =
+                        std::stof(argument.substr(std::strlen("--quit-after=")));
+                    if (!(quitAfterSeconds > 0.0f)) {
+                        logWarn("--quit-after attend une duree positive en secondes. Ignore.");
+                        quitAfterSeconds = 0.0f;
+                    }
+                } catch (const std::exception&) {
+                    logWarn("--quit-after : duree illisible. Ignore : " + argument);
+                    quitAfterSeconds = 0.0f;
+                }
+            } else if (argument == "--freeze-anim") {
+                freezeAnimation = true;
             } else if (argument.rfind("--", 0) == 0) {
                 logWarn("Option inconnue, ignoree : " + argument);
             } else if (sceneArgument.empty()) {
@@ -2289,8 +2325,27 @@ int main(int argc, char** argv) {
         // fenetre, dont la Phase 18 a montre qu'il varie de ~15 % entre deux
         // runs identiques. Chargement exclu : il precede la boucle.
         const auto loopStart = ProfileClock::now();
+        // PHASE 30 : bilan des ressources une fois le monde charge, avant la
+        // premiere image. Le meme bilan est ecrit toutes les 10 s, puis a la
+        // fermeture avec les pics de la session.
+        logInfo("Ressources apres chargement (PHASE 30) : " + processMemoryLine() + ", " +
+                context.gpuMemoryLine() + ".");
+        double lastResourceLog = 0.0;
         while (!window.shouldClose()) {
             window.pollEvents();
+
+            const double loopSeconds =
+                std::chrono::duration<double>(ProfileClock::now() - loopStart).count();
+            if (quitAfterSeconds > 0.0f && loopSeconds >= quitAfterSeconds) {
+                logInfo("--quit-after : " + std::to_string(quitAfterSeconds) +
+                        " s de boucle ecoulees, fermeture.");
+                break;
+            }
+            if (loopSeconds - lastResourceLog >= 10.0) {
+                lastResourceLog = loopSeconds;
+                logInfo("Ressources (PHASE 30) : " + processMemoryLine() + ", " +
+                        context.gpuMemoryLine() + ".");
+            }
 
             const double now = glfwGetTime();
             const float deltaTime = static_cast<float>(now - lastTime);
@@ -2301,6 +2356,9 @@ int main(int argc, char** argv) {
             // demarrage, donc la valeur reste petite et n'use pas la precision
             // d'un float, contrairement a une horloge absolue.
             const float elapsedSeconds = static_cast<float>(now);
+            // PHASE 30 : horloge des SHADERS seulement (--freeze-anim). La
+            // logique de jeu garde elapsedSeconds.
+            const float animationSeconds = freezeAnimation ? 0.0f : elapsedSeconds;
 
             // --- Bascule du MODE EDITEUR (PHASE 15) ------------------------
             // Traitee AVANT camera.update : entrer en edition change le mode et
@@ -3682,7 +3740,7 @@ int main(int argc, char** argv) {
                     item.count = static_cast<uint32_t>(instances.size());
                     item.material = Material::Foliage;
                     // Amplitude d'ondulation NULLE : un tronc ne plie pas.
-                    item.params = { 0.0f, elapsedSeconds, 0.0f, 0.0f };
+                    item.params = { 0.0f, animationSeconds, 0.0f, 0.0f };
                     instancedItems.push_back(item);
                 };
                 pushTrees(treeInstances, sceneryTreeMeshHandle);
@@ -3703,7 +3761,7 @@ int main(int argc, char** argv) {
                         // seul materiau qui s'en sert : un arbre pousse 0 et
                         // traverse le meme pipeline, inchange.
                         item.params = { vegetation->params().grassSway,
-                                        elapsedSeconds, 0.0f,
+                                        animationSeconds, 0.0f,
                                         vegetation->params().grassCutout };
                         instancedItems.push_back(item);
                     }
@@ -3734,7 +3792,7 @@ int main(int argc, char** argv) {
                         // pas par un masque - ces plantes sont peu nombreuses,
                         // le budget de sommets n'est pas le sujet.
                         item.params = { 0.35f * vegetation->params().grassSway,
-                                        elapsedSeconds, 0.0f, 0.0f };
+                                        animationSeconds, 0.0f, 0.0f };
                         instancedItems.push_back(item);
                     }
                 }
@@ -3760,7 +3818,7 @@ int main(int argc, char** argv) {
                     item.instances = instances.data();
                     item.count = static_cast<uint32_t>(instances.size());
                     item.material = Material::Foliage;
-                    item.params = { 0.0f, elapsedSeconds, 0.0f, -1.0f };
+                    item.params = { 0.0f, animationSeconds, 0.0f, -1.0f };
                     instancedItems.push_back(item);
                 };
                 pushRocks(boulderInstances, boulderMeshHandle);
@@ -3786,7 +3844,7 @@ int main(int argc, char** argv) {
                     item.instances = instances.data();
                     item.count = static_cast<uint32_t>(instances.size());
                     item.material = Material::Foliage;
-                    item.params = { sway, elapsedSeconds, 0.0f, 0.0f };
+                    item.params = { sway, animationSeconds, 0.0f, 0.0f };
                     instancedItems.push_back(item);
                 };
                 pushBushes(shrubInstances, shrubMeshHandle, 0.04f);
@@ -3846,7 +3904,7 @@ int main(int argc, char** argv) {
                 renderer.setWeatherVisuals(visuals.fogColor, visuals.fogDensityPerMeter,
                                            visuals.precipitation, visuals.snow,
                                            visuals.fallVelocity, visuals.groundDarkening,
-                                           elapsedSeconds);
+                                           animationSeconds);
                 frameProfile.weatherVisualsMicros += profileMicros(tw0, ProfileClock::now());
 
                 // Journal BORNE PAR LE TEMPS (lecon de la Phase 24 : "sur
@@ -3917,6 +3975,12 @@ int main(int argc, char** argv) {
 
         // S'assurer que le GPU a fini avant de detruire quoi que ce soit.
         renderer.waitIdle();
+
+        // PHASE 30 : bilan des ressources, AVANT toute destruction - les chiffres
+        // "vivants" sont donc ceux du jeu en regime etabli, les pics ceux de la
+        // session entiere.
+        logInfo("Ressources en fin de partie (PHASE 30) : " + processMemoryLine() + ", " +
+                context.gpuMemoryLine() + ".");
 
         if (frameProfile.frames > 0) {
             const auto per = [&](uint64_t total) {
