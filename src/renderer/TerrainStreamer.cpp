@@ -20,15 +20,19 @@ TerrainStreamer::TerrainStreamer(const Heightmap& heightmap, Renderer& renderer,
       quadtree_(heightmap, params.quadtree) {
     logInfo(quadtree_.describe());
 
-    const std::size_t bytesPerNode = static_cast<std::size_t>(quadtree_.nodeCells() + 1) *
-                                     (quadtree_.nodeCells() + 1) * sizeof(Vertex) +
-                                     static_cast<std::size_t>(quadtree_.trianglesPerNode()) *
-                                     3 * sizeof(uint32_t);
+    // PHASE 30 : une tuile ne pese plus que ses sommets, au format compact
+    // (16 octets au lieu de 68) ; sa topologie est televersee UNE fois pour
+    // toutes, ici, en uint16.
+    bytesPerNode_ = static_cast<std::size_t>(quadtree_.nodeCells() + 1) *
+                    (quadtree_.nodeCells() + 1) * sizeof(TerrainVertex);
+    sharedIndexSet_ = renderer_.addSharedIndices(sharedIndices());
     logInfo("Streaming terrain : au plus " + std::to_string(params_.maxResidentNodes) +
             " tuiles residentes (" +
-            std::to_string(params_.maxResidentNodes * bytesPerNode / (1024 * 1024)) +
-            " Mo de geometrie GPU), " + std::to_string(params_.maxUploadsPerFrame) +
-            " construites par frame.");
+            std::to_string(params_.maxResidentNodes * bytesPerNode_ / (1024 * 1024)) +
+            " Mo de geometrie GPU, " + std::to_string(bytesPerNode_ / 1024) +
+            " Ko par tuile, topologie partagee de " +
+            std::to_string(sharedIndices().size() * sizeof(uint16_t) / 1024) + " Ko), " +
+            std::to_string(params_.maxUploadsPerFrame) + " construites par frame.");
 
     pinTopLevels();
 }
@@ -46,11 +50,6 @@ void TerrainStreamer::pinTopLevels() {
     const int lowest = std::max(0, static_cast<int>(quadtree_.rootLevel()) -
                                        static_cast<int>(params_.pinnedTopLevels) + 1);
 
-    const std::size_t bytesPerNode =
-        static_cast<std::size_t>(quadtree_.nodeCells() + 1) *
-            (quadtree_.nodeCells() + 1) * sizeof(Vertex) +
-        static_cast<std::size_t>(quadtree_.trianglesPerNode()) * 3 * sizeof(uint32_t);
-
     for (uint32_t index = 0; index < quadtree_.nodeCount(); ++index) {
         if (static_cast<int>(quadtree_.node(index).level) < lowest) {
             continue;
@@ -61,19 +60,19 @@ void TerrainStreamer::pinTopLevels() {
         }
         ResidentNode node;
         node.mesh = mesh;
-        node.bytes = bytesPerNode;
+        node.bytes = bytesPerNode_;
         node.pinned = true;
         // Jamais rajeunie ensuite : elle n'est de toute facon pas evincable.
         node.lastUsedFrame = 0;
         resident_.emplace(index, node);
-        residentBytes_ += bytesPerNode;
+        residentBytes_ += bytesPerNode_;
         ++pinnedCount_;
     }
 
     logInfo("Sommet du quadtree epingle : " + std::to_string(pinnedCount_) +
             " tuiles de niveau " + std::to_string(lowest) + " a " +
             std::to_string(static_cast<int>(quadtree_.rootLevel())) + " (" +
-            std::to_string(pinnedCount_ * bytesPerNode / (1024 * 1024)) +
+            std::to_string(pinnedCount_ * bytesPerNode_ / (1024 * 1024)) +
             " Mo), jamais evincees. C'est ce qui rend le repli sur l'ancetre "
             "toujours disponible.");
 }
@@ -107,11 +106,11 @@ const std::vector<uint32_t>& TerrainStreamer::sharedIndices() const {
     // n'aurait parie sur la boucle d'indices.
     //
     // Construite a la premiere tuile puis simplement RECOPIEE dans le MeshData.
-    // Ne pas la recopier du tout - partager un unique buffer d'indices GPU entre
-    // toutes les tuiles - economiserait en plus 96 Ko par tuile residente, mais
-    // demanderait de dissocier sommets et indices dans Renderer::addMesh : c'est
-    // un chantier de renderer, pas de streaming (voir NOTES-PHASE18.md).
-    if (indexTemplate_.empty() || !params_.cacheTileWork) {
+    // PHASE 30 : elle n'est meme plus recopiee. Le chantier de renderer que
+    // cette note annoncait (NOTES-PHASE18.md) est fait : un UNIQUE buffer
+    // d'indices GPU, en uint16, sert toutes les tuiles - 96 Ko economises par
+    // tuile residente, et une seule liaison d'indices par image.
+    if (indexTemplate_.empty()) {
         indexTemplate_ = terrainNodeIndices(quadtree_.nodeCells());
     }
     return indexTemplate_;
@@ -148,19 +147,40 @@ bool TerrainStreamer::wantsParallel(std::size_t count) const {
 }
 
 void TerrainStreamer::meshBatch(const std::vector<uint32_t>& nodes) {
-    batchMeshes_.clear();
     batchErrors_.clear();
-    batchMeshes_.resize(nodes.size());
     batchErrors_.resize(nodes.size());
+    batchMeshes_.assign(nodes.size(), kInvalidMesh);
+    batchWrites_.assign(nodes.size(), Renderer::TerrainMeshWrite{});
     if (nodes.empty()) {
         return;
     }
 
-    // Le corps d'un travailleur. Il ne touche QUE batchMeshes_[k] et
-    // batchErrors_[k] pour k dans [begin, end) - des elements deja alloues, donc
-    // ni le vecteur ni sa capacite ne bougent pendant l'execution. Tout le reste
-    // de ce qu'il lit (heightmap_, quadtree_, params_) est const pour la duree
-    // de la session.
+    // --- 1. Reservation, thread de rendu -----------------------------------
+    // Faire de la place AVANT de reserver, sinon le pic de residence depasserait
+    // le plafond le temps du lot. Les tuiles deja reservees de ce lot comptent
+    // comme residentes : elles le seront a la fin de la frame.
+    const auto t0 = Clock::now();
+    for (std::size_t k = 0; k < nodes.size(); ++k) {
+        while (resident_.size() + k >= params_.maxResidentNodes) {
+            if (!evictOne()) {
+                break; // tout est utilise cette frame : on laisse deborder
+            }
+        }
+        try {
+            batchWrites_[k] = renderer_.beginTerrainMesh(
+                (quadtree_.nodeCells() + 1) * (quadtree_.nodeCells() + 1), sharedIndexSet_);
+        } catch (const std::exception& e) {
+            batchErrors_[k] = e.what();
+        }
+    }
+    uploadMicros_ += microsBetween(t0, Clock::now());
+
+    // --- 2. Ecriture des sommets, eventuellement en parallele ----------------
+    // Le corps d'un travailleur. Il ne touche QUE la zone reservee
+    // batchWrites_[k].vertices et batchErrors_[k] pour k dans [begin, end) -
+    // deja allouees, donc ni les vecteurs ni leur capacite ne bougent pendant
+    // l'execution. Tout le reste de ce qu'il lit (heightmap_, quadtree_,
+    // params_) est const pour la duree de la session.
     //
     // Le chronometrage par tuile est fait ICI, mais il n'est PAS accumule dans
     // geometryMicros_ depuis un thread : chaque tuile depose sa duree dans son
@@ -173,21 +193,22 @@ void TerrainStreamer::meshBatch(const std::vector<uint32_t>& nodes) {
 
     const auto worker = [&](std::size_t begin, std::size_t end) {
         for (std::size_t k = begin; k < end; ++k) {
-            const auto t0 = Clock::now();
+            if (batchWrites_[k].vertices == nullptr) {
+                continue; // reservation echouee, message deja depose
+            }
+            const auto t1 = Clock::now();
             try {
-                batchMeshes_[k] = terrainNodeMeshData(heightmap_, quadtree_, nodes[k],
-                                                      false, params_.cacheTileWork);
+                writeTerrainNodeVertices(heightmap_, quadtree_, nodes[k],
+                                         batchWrites_[k].vertices, params_.cacheTileWork);
             } catch (const std::exception& e) {
                 // Une exception ne doit JAMAIS traverser la frontiere d'un
                 // std::thread : elle appellerait std::terminate. Elle est donc
                 // capturee ici et rendue a l'appelant comme une donnee.
                 batchErrors_[k] = e.what();
-                batchMeshes_[k] = MeshData{};
             } catch (...) {
                 batchErrors_[k] = "exception inconnue";
-                batchMeshes_[k] = MeshData{};
             }
-            perTileMicros[k] = microsBetween(t0, Clock::now());
+            perTileMicros[k] = microsBetween(t1, Clock::now());
         }
     };
 
@@ -226,60 +247,68 @@ void TerrainStreamer::meshBatch(const std::vector<uint32_t>& nodes) {
     for (uint64_t micros : perTileMicros) {
         geometryMicros_ += micros;
     }
+
+    // --- 3. Livraison, thread de rendu ---------------------------------------
+    const auto t2 = Clock::now();
+    for (std::size_t k = 0; k < nodes.size(); ++k) {
+        const MeshHandle mesh = batchWrites_[k].mesh;
+        if (!batchErrors_[k].empty()) {
+            if (mesh != kInvalidMesh) {
+                renderer_.removeMesh(mesh);
+            }
+            continue;
+        }
+        renderer_.endTerrainMesh(mesh);
+        batchMeshes_[k] = mesh;
+        ++builtNodes_;
+    }
+    uploadMicros_ += microsBetween(t2, Clock::now());
 }
 
-MeshHandle TerrainStreamer::uploadNode(uint32_t nodeIndex, MeshData& data) {
+MeshHandle TerrainStreamer::buildNode(uint32_t nodeIndex) {
+    // Chemin SEQUENTIEL : reserve, ecrit, livre une tuile. C'est le chemin du
+    // sommet epingle (construit avant la premiere frame) et, depuis que le
+    // defaut est meshThreads = 1, celui de la construction courante.
+    //
+    // PHASE 30 : plus aucun MeshData ici. Les sommets sont ecrits au format
+    // compact directement dans la zone reservee - la memoire que le GPU lira
+    // en memoire unifiee, un staging sinon. Le poste "televersement" ne compte
+    // plus que la reservation et la livraison.
+    const auto t0 = Clock::now();
+    Renderer::TerrainMeshWrite write;
     try {
-        const auto t1 = Clock::now();
-        // Les indices sont poses ICI et non dans terrainNodeMeshData, pour que
-        // les deux postes soient chronometres separement (voir buildProfile).
-        data.indices = sharedIndices();
-        const auto t2 = Clock::now();
-        // log = false : plusieurs tuiles par frame, une ligne chacune rendrait la
-        // sortie inexploitable (et couterait plus que l'upload).
-        const MeshHandle mesh = renderer_.addMesh(data, false);
-        const auto t3 = Clock::now();
-
-        ++builtNodes_;
-        indicesMicros_ += microsBetween(t1, t2);
-        uploadMicros_  += microsBetween(t2, t3);
-        return mesh;
+        write = renderer_.beginTerrainMesh(
+            (quadtree_.nodeCells() + 1) * (quadtree_.nodeCells() + 1), sharedIndexSet_);
     } catch (const std::exception& e) {
-        // Une tuile qu'on ne sait pas construire ne doit pas arreter le jeu :
-        // elle sera simplement absente, et le message dit laquelle. Le cas
-        // realiste est un manque de memoire GPU, pas une donnee invalide.
+        uploadMicros_ += microsBetween(t0, Clock::now());
+        // Le cas realiste est un manque de memoire GPU, pas une donnee
+        // invalide : la tuile sera simplement absente, et le message dit
+        // laquelle.
         logWarn("Streaming terrain : tuile " + std::to_string(nodeIndex) +
                 " non televersee (" + e.what() + ").");
         return kInvalidMesh;
     }
-}
-
-MeshHandle TerrainStreamer::buildNode(uint32_t nodeIndex) {
-    // Chemin SEQUENTIEL : maille une tuile puis la televerse, sans jamais garder
-    // plus d'un MeshData en vie. C'est le chemin du sommet epingle (construit
-    // avant la premiere frame) et, depuis que le defaut est meshThreads = 1,
-    // celui de la construction courante.
-    //
-    // Ne pas passer par meshBatch ici n'est pas une duplication gratuite :
-    // meshBatch dimensionne un vecteur de MeshData pour TOUT le lot, ce qui fait
-    // vivre jusqu'a 53 tuiles simultanement (~15 Mo) la ou ce chemin-ci n'en
-    // tient qu'une. Mesure : le pic memoire du processus montait de 5,6 Mo quand
-    // tout passait par le lot. Le chemin par defaut retrouve ainsi exactement le
-    // profil memoire d'avant la Phase 19.
-    const auto t0 = Clock::now();
+    const auto t1 = Clock::now();
     try {
-        scratchMesh_ = terrainNodeMeshData(heightmap_, quadtree_, nodeIndex, false,
-                                           params_.cacheTileWork);
+        writeTerrainNodeVertices(heightmap_, quadtree_, nodeIndex, write.vertices,
+                                 params_.cacheTileWork);
     } catch (const std::exception& e) {
-        geometryMicros_ += microsBetween(t0, Clock::now());
+        geometryMicros_ += microsBetween(t1, Clock::now());
+        renderer_.removeMesh(write.mesh);
         logWarn("Streaming terrain : tuile " + std::to_string(nodeIndex) +
                 " non maillee (" + e.what() + ").");
         return kInvalidMesh;
     }
-    const uint64_t micros = microsBetween(t0, Clock::now());
+    const auto t2 = Clock::now();
+    renderer_.endTerrainMesh(write.mesh);
+    const auto t3 = Clock::now();
+
+    const uint64_t micros = microsBetween(t1, t2);
     geometryMicros_ += micros;
     meshWallMicros_ += micros;
-    return uploadNode(nodeIndex, scratchMesh_);
+    uploadMicros_ += microsBetween(t0, t1) + microsBetween(t2, t3);
+    ++builtNodes_;
+    return write.mesh;
 }
 
 bool TerrainStreamer::evictOne() {
@@ -354,11 +383,6 @@ void TerrainStreamer::appendDrawItems(const glm::vec3& cameraPosition,
     fallbackCount_ = 0;
     uncoveredCount_ = 0;
 
-    const std::size_t bytesPerNode =
-        static_cast<std::size_t>(quadtree_.nodeCells() + 1) *
-            (quadtree_.nodeCells() + 1) * sizeof(Vertex) +
-        static_cast<std::size_t>(quadtree_.trianglesPerNode()) * 3 * sizeof(uint32_t);
-
     const bool priming = (frameCounter_ <= params_.primingFrames);
     uint32_t uploadsLeft = priming ? std::numeric_limits<uint32_t>::max()
                                    : params_.maxUploadsPerFrame;
@@ -402,14 +426,13 @@ void TerrainStreamer::appendDrawItems(const glm::vec3& cameraPosition,
     // --- 1b/1c. Maillage puis televersement ---------------------------------
     // Deux chemins, et le choix se fait sur la TAILLE DU LOT :
     //
-    //   - lot parallelisable : tout le lot est maille d'abord (meshBatch, aucun
-    //     appel Vulkan, plusieurs threads), puis televerse en sequence ;
-    //   - sinon : chaque tuile est maillee et televersee a la suite, sans jamais
-    //     garder plus d'un MeshData en vie. C'est le chemin par DEFAUT, et il
-    //     est identique a celui d'avant la Phase 19, cout memoire compris.
+    //   - lot parallelisable : tout le lot est reserve, puis ecrit (meshBatch,
+    //     aucun appel Vulkan pendant l'ecriture, plusieurs threads), puis livre ;
+    //   - sinon : chaque tuile est reservee, ecrite et livree a la suite. C'est
+    //     le chemin par DEFAUT.
     //
-    // Dans les deux cas les addMesh ont lieu sur le thread de rendu, en
-    // sequence, et dans l'ordre de selection - donc du plus proche au plus
+    // Dans les deux cas les appels au Renderer ont lieu sur le thread de rendu,
+    // en sequence, et dans l'ordre de selection - donc du plus proche au plus
     // lointain.
 
     // Suivi du plus gros lot : il doit compter les DEUX chemins, sinon le bilan
@@ -429,17 +452,19 @@ void TerrainStreamer::appendDrawItems(const glm::vec3& cameraPosition,
                     " non maillee (" + batchErrors_[k] + ").");
             continue;
         }
-        // Faire de la place AVANT de televerser, sinon le pic de residence
-        // depasserait le plafond le temps d'un upload. (Le maillage, lui,
-        // n'alloue rien sur le GPU : c'est bien l'upload qui doit etre couvert.)
-        while (resident_.size() >= params_.maxResidentNodes) {
-            if (!evictOne()) {
-                break; // tout est utilise cette frame : on laisse deborder
+        MeshHandle mesh = kInvalidMesh;
+        if (parallel) {
+            mesh = batchMeshes_[k]; // place deja faite par meshBatch
+        } else {
+            // Faire de la place AVANT de reserver, sinon le pic de residence
+            // depasserait le plafond le temps d'une tuile.
+            while (resident_.size() >= params_.maxResidentNodes) {
+                if (!evictOne()) {
+                    break; // tout est utilise cette frame : on laisse deborder
+                }
             }
+            mesh = buildNode(nodeIndex);
         }
-
-        const MeshHandle mesh = parallel ? uploadNode(nodeIndex, batchMeshes_[k])
-                                         : buildNode(nodeIndex);
         if (mesh == kInvalidMesh) {
             continue;
         }
@@ -447,18 +472,11 @@ void TerrainStreamer::appendDrawItems(const glm::vec3& cameraPosition,
 
         ResidentNode node;
         node.mesh = mesh;
-        node.bytes = bytesPerNode;
+        node.bytes = bytesPerNode_;
         node.lastUsedFrame = frameCounter_;
         resident_.emplace(nodeIndex, node);
-        residentBytes_ += bytesPerNode;
+        residentBytes_ += bytesPerNode_;
         --pendingCount_; // finalement servie dans la frame meme
-    }
-
-    // Le lot ne doit pas garder ses maillages en vie jusqu'a la frame suivante :
-    // ce sont ~287 Ko par tuile.
-    if (parallel) {
-        batchMeshes_.clear();
-        batchMeshes_.shrink_to_fit();
     }
 
     // --- 2. Choix des ancetres de repli (PHASE 12) --------------------------
@@ -489,6 +507,7 @@ void TerrainStreamer::appendDrawItems(const glm::vec3& cameraPosition,
     // --- 3. Emission ---------------------------------------------------------
     const bool hasFallback = !fallbackAncestors_.empty();
 
+    const int32_t vertsPerRow = static_cast<int32_t>(quadtree_.nodeCells() + 1);
     auto emit = [&](const TerrainQuadtree::SelectedNode& node, MeshHandle mesh) {
         DrawItem item;
         item.mesh = mesh;
@@ -497,6 +516,11 @@ void TerrainStreamer::appendDrawItems(const glm::vec3& cameraPosition,
         item.model = glm::mat4(1.0f);
         item.material = Material::Terrain;
         item.params = glm::vec4(node.morphStart, node.morphEnd, 0.0f, 0.0f);
+        // PHASE 30 : ou est la tuile dans la grille - terrain.vert en deduit la
+        // position horizontale, la cible de morphing et l'UV de chaque sommet.
+        const TerrainQuadtree::Node& grid = quadtree_.node(node.nodeIndex);
+        item.grid = glm::ivec4(static_cast<int32_t>(grid.ix0), static_cast<int32_t>(grid.iz0),
+                               static_cast<int32_t>(grid.stride), vertsPerRow);
         out.push_back(item);
         ++drawnCount_;
     };

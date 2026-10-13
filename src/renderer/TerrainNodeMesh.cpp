@@ -89,9 +89,16 @@ std::vector<uint32_t> terrainNodeIndices(uint32_t nodeCells) {
     return indices;
 }
 
-MeshData terrainNodeMeshData(const Heightmap& heightmap, const TerrainQuadtree& quadtree,
-                             uint32_t nodeIndex, bool withIndices,
-                             bool reuseParentGrid) {
+namespace {
+
+// PHASE 30 : le parcours d'un noeud, commun aux deux formats de sortie
+// (MeshData de reference et TerrainVertex du GPU). `sink(v, gx, gz, here,
+// parent)` recoit chaque sommet - son indice dans la tuile, ses indices de
+// grille ecretes, son echantillon et celui de sa cible de geomorphing. Un seul
+// parcours, donc deux sorties qui ne PEUVENT PAS diverger.
+template <typename Sink>
+void forEachNodeVertex(const Heightmap& heightmap, const TerrainQuadtree& quadtree,
+                       uint32_t nodeIndex, bool reuseParentGrid, Sink&& sink) {
     if (nodeIndex >= quadtree.nodeCount()) {
         throw std::runtime_error("TerrainNodeMesh : indice de noeud hors limites.");
     }
@@ -133,11 +140,6 @@ MeshData terrainNodeMeshData(const Heightmap& heightmap, const TerrainQuadtree& 
         }
     }
 
-    MeshData mesh;
-    mesh.name = "tuile L" + std::to_string(static_cast<int>(node.level)) + " (" +
-                std::to_string(node.ix0) + "," + std::to_string(node.iz0) + ")";
-    mesh.vertices.resize(static_cast<std::size_t>(verts) * verts);
-
     for (uint32_t j = 0; j < verts; ++j) {
         for (uint32_t i = 0; i < verts; ++i) {
             // Indices de grille du sommet, ECRETES sur le bord du terrain.
@@ -157,43 +159,97 @@ MeshData terrainNodeMeshData(const Heightmap& heightmap, const TerrainQuadtree& 
                 ? parentGrid[static_cast<std::size_t>(j / 2u) * parentVerts + (i / 2u)]
                 : parentSample;
 
-            Vertex& vertex = mesh.vertices[static_cast<std::size_t>(j) * verts + i];
-            vertex.pos = here.position;
-            vertex.normal = here.normal;
-            vertex.morphPos = parent.position;
-            vertex.morphNormal = parent.normal;
-
-            // Teinte neutre : le fragment shader colore par altitude et par
-            // pente. Reserve a une future classification LiDAR par sommet.
-            vertex.color = { 1.0f, 1.0f, 1.0f };
-
-            // UV sur TOUT le terrain (et non sur la tuile) : c'est le repere
-            // naturel d'une future orthophoto, et il doit rester continu d'une
-            // tuile a l'autre.
-            vertex.uv = { static_cast<float>(gx) / static_cast<float>(cells),
-                          static_cast<float>(gz) / static_cast<float>(cells) };
+            sink(static_cast<std::size_t>(j) * verts + i, gx, gz, here, parent);
         }
     }
+}
+
+// Controle de coherence, meme esprit que TerrainMesh : on refuse de pousser
+// vers le GPU une geometrie qu'on sait cassee. Le generateur etant
+// deterministe, ce test attrape une erreur de CODE (indexation, pas de
+// parcours), pas une donnee douteuse.
+[[noreturn]] void throwNonFinite() {
+    throw std::runtime_error(
+        "TerrainNodeMesh : coordonnee ou normale non finie (NaN/infini) "
+        "produite par la heightmap.");
+}
+
+} // namespace
+
+MeshData terrainNodeMeshData(const Heightmap& heightmap, const TerrainQuadtree& quadtree,
+                             uint32_t nodeIndex, bool withIndices,
+                             bool reuseParentGrid) {
+    if (nodeIndex >= quadtree.nodeCount()) {
+        throw std::runtime_error("TerrainNodeMesh : indice de noeud hors limites.");
+    }
+    const TerrainQuadtree::Node& node = quadtree.node(nodeIndex);
+    const uint32_t nodeCells = quadtree.nodeCells();
+    const uint32_t verts = nodeCells + 1;
+    const uint32_t cells = heightmap.resolution() - 1;
+
+    MeshData mesh;
+    mesh.name = "tuile L" + std::to_string(static_cast<int>(node.level)) + " (" +
+                std::to_string(node.ix0) + "," + std::to_string(node.iz0) + ")";
+    mesh.vertices.resize(static_cast<std::size_t>(verts) * verts);
+
+    forEachNodeVertex(heightmap, quadtree, nodeIndex, reuseParentGrid,
+                      [&](std::size_t v, uint32_t gx, uint32_t gz,
+                          const GridSample& here, const GridSample& parent) {
+        Vertex& vertex = mesh.vertices[v];
+        vertex.pos = here.position;
+        vertex.normal = here.normal;
+        vertex.morphPos = parent.position;
+        vertex.morphNormal = parent.normal;
+
+        // Teinte neutre : le fragment shader colore par altitude et par
+        // pente. Reserve a une future classification LiDAR par sommet.
+        vertex.color = { 1.0f, 1.0f, 1.0f };
+
+        // UV sur TOUT le terrain (et non sur la tuile) : c'est le repere
+        // naturel d'une future orthophoto, et il doit rester continu d'une
+        // tuile a l'autre.
+        vertex.uv = { static_cast<float>(gx) / static_cast<float>(cells),
+                      static_cast<float>(gz) / static_cast<float>(cells) };
+    });
 
     if (withIndices) {
         mesh.indices = terrainNodeIndices(nodeCells);
     }
 
-    // Controle de coherence, meme esprit que TerrainMesh : on refuse de pousser
-    // vers le GPU une geometrie qu'on sait cassee. Le generateur etant
-    // deterministe, ce test attrape une erreur de CODE (indexation, pas de
-    // parcours), pas une donnee douteuse.
     for (const Vertex& vertex : mesh.vertices) {
         if (!std::isfinite(vertex.pos.x) || !std::isfinite(vertex.pos.y) ||
             !std::isfinite(vertex.pos.z) || !std::isfinite(vertex.normal.y) ||
             !std::isfinite(vertex.morphPos.y)) {
-            throw std::runtime_error(
-                "TerrainNodeMesh : coordonnee ou normale non finie (NaN/infini) "
-                "produite par la heightmap.");
+            throwNonFinite();
         }
     }
 
     return mesh;
+}
+
+void writeTerrainNodeVertices(const Heightmap& heightmap, const TerrainQuadtree& quadtree,
+                              uint32_t nodeIndex, TerrainVertex* out,
+                              bool reuseParentGrid) {
+    bool finite = true;
+    forEachNodeVertex(heightmap, quadtree, nodeIndex, reuseParentGrid,
+                      [&](std::size_t v, uint32_t /*gx*/, uint32_t /*gz*/,
+                          const GridSample& here, const GridSample& parent) {
+        // Les memes octets que toTerrainVertex(Vertex) appliquee au sommet de
+        // terrainNodeMeshData : altitudes recopiees, normales quantifiees.
+        TerrainVertex packed;
+        packed.height = here.position.y;
+        packed.morphHeight = parent.position.y;
+        packed.normal[0] = packSnorm16(here.normal.x);
+        packed.normal[1] = packSnorm16(here.normal.z);
+        packed.morphNormal[0] = packSnorm16(parent.normal.x);
+        packed.morphNormal[1] = packSnorm16(parent.normal.z);
+        out[v] = packed;
+        finite = finite && std::isfinite(here.position.y) && std::isfinite(here.normal.y) &&
+                 std::isfinite(parent.position.y);
+    });
+    if (!finite) {
+        throwNonFinite();
+    }
 }
 
 } // namespace vercora

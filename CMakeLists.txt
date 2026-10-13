@@ -117,6 +117,7 @@ add_executable(vercora
   src/editor/SceneFile.cpp
   src/renderer/VulkanContext.cpp
   src/renderer/VulkanBuffer.cpp
+  src/renderer/GpuBufferPool.cpp
   src/renderer/Mesh.cpp
   src/renderer/TerrainMesh.cpp
   src/renderer/TerrainNodeMesh.cpp

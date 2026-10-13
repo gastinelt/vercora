@@ -1,6 +1,11 @@
 #pragma once
 
+#include "renderer/GpuVertex.hpp"
 #include "renderer/MeshData.hpp"
+
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace vercora {
 
@@ -19,5 +24,18 @@ class Heightmap;
 //
 // Lance std::runtime_error si la grille ne peut pas produire un maillage sain.
 MeshData terrainMeshData(const Heightmap& heightmap);
+
+// PHASE 30. Le meme terrain d'un seul bloc, au format GPU du terrain
+// (TerrainVertex, 16 octets) : c'est ce que televerse le chemin --no-lod, sans
+// construire au passage le MeshData de 68 octets par sommet (1,7 Go sur la zone
+// au pas de 1 m). vertices[v] == toTerrainVertex(terrainMeshData(h).vertices[v])
+// au bit pres et les indices sont identiques (verifie par les tests). Les
+// sommets n'ont pas de cible de geomorphing : elle vaut le sommet lui-meme.
+struct TerrainGpuMesh {
+    std::vector<TerrainVertex> vertices;
+    std::vector<uint32_t> indices;
+    std::string name;
+};
+TerrainGpuMesh terrainGpuMeshData(const Heightmap& heightmap);
 
 } // namespace vercora

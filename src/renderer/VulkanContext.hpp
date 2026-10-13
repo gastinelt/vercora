@@ -133,6 +133,17 @@ public:
     // Faux sur un GPU discret classique (hors BAR redimensionnable).
     bool unifiedMemory() const { return unifiedMemory_; }
 
+    // PHASE 30. true si la geometrie doit etre ecrite DIRECTEMENT dans sa
+    // memoire device-local mappee plutot que par staging : memoire unifiee ET
+    // GPU integre (ou logiciel). Un GPU discret peut aussi exposer une memoire
+    // device-local mappable (BAR, 256 Mo sans ReBAR) ; elle est trop petite et
+    // trop precieuse pour y loger le terrain, il garde donc le staging.
+    bool preferDirectGeometryWrites() const {
+        return unifiedMemory_ &&
+               (deviceType_ == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+                deviceType_ == VK_PHYSICAL_DEVICE_TYPE_CPU);
+    }
+
 private:
     void createInstance();
     void setupDebugMessenger();
@@ -160,6 +171,7 @@ private:
 
     bool anisotropyEnabled_ = false;
     bool unifiedMemory_ = false;
+    VkPhysicalDeviceType deviceType_ = VK_PHYSICAL_DEVICE_TYPE_OTHER;
 
     // Proprietes memoire du GPU, lues une fois : findMemoryType les
     // interrogeait a CHAQUE allocation (deux par tuile de terrain).

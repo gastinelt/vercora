@@ -18,12 +18,33 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
 namespace vercora {
 
 namespace {
+
+// PHASE 30 : barriere d'EXECUTION placee AVANT les copies staging -> pool.
+//
+// Avant le pool, chaque copie ecrivait un buffer neuf, que rien n'avait jamais
+// lu. Desormais une plage du pool est RECYCLEE : la copie ecrit des octets que
+// des images precedentes ont lus comme sommets ou indices. Le delai de retrait
+// (Renderer::removeMesh) garantit que ces images sont terminees, mais il le
+// garantit cote CPU, par les fences ; la validation de SYNCHRONISATION signale
+// a juste titre que rien ne l'exprime cote GPU (SYNC-HAZARD-WRITE-AFTER-READ,
+// 414 messages en 30 s de survol avec --force-staging). Un danger ecriture
+// apres lecture ne demande qu'une dependance d'EXECUTION : pas de masque
+// d'acces, l'etage d'assemblage des sommets avant, le transfert apres. Le
+// chemin d'ecriture directe (memoire unifiee) n'a pas de copie, donc pas de
+// barriere.
+void recordCopyAfterReadBarrier(VkCommandBuffer commandBuffer) {
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 0, nullptr);
+}
 
 // Paire de shaders associee a chaque materiau. L'ordre suit celui de l'enum
 // Material : c'est ce tableau qui fait le lien entre le vocabulaire du gameplay
@@ -43,6 +64,23 @@ Renderer::Renderer(VulkanContext& context, Window& window,
                    const RenderOptions& options)
     : context_(context), window_(window), options_(options) {
     swapChain_ = std::make_unique<SwapChain>(context_, window_);
+
+    // PHASE 30 : le pool de geometrie. En memoire unifiee (GPU integre,
+    // lavapipe), ses blocs sont mappes et la geometrie y est ecrite DIRECTEMENT
+    // : ni staging, ni copie, ni barriere. Sur un GPU discret, la memoire
+    // device-local n'est pas (ou peu) mappable : chemin staging de la Phase 12.
+    const bool directWrites = context_.preferDirectGeometryWrites() && !options_.forceStaging;
+    geometryPool_ = std::make_unique<GpuBufferPool>(
+        context_,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, directWrites);
+    logInfo(std::string("Geometrie : pool de blocs de ") +
+            std::to_string(GpuBufferPool::kDefaultBlockSize / (1024 * 1024)) + " Mo, " +
+            (directWrites ? "ecriture DIRECTE (memoire unifiee, sans staging)."
+                          : (options_.forceStaging
+                                 ? "televersement par staging (FORCE, --force-staging)."
+                                 : "televersement par staging (memoire device-local non mappable).")));
 
     createCommandPool(); // requis avant les buffers (transferts staging)
 
@@ -88,6 +126,15 @@ Renderer::Renderer(VulkanContext& context, Window& window,
 Renderer::~Renderer() {
     VkDevice device = context_.device();
 
+    // PHASE 30 : rien ne doit plus lire la geometrie quand ses plages sont
+    // rendues au pool (les Mesh le font en se detruisant, apres ce corps).
+    vkDeviceWaitIdle(device);
+    pendingTerrainWrites_.clear();
+    for (SharedIndices& shared : sharedIndices_) {
+        geometryPool_->release(shared.range);
+    }
+    sharedIndices_.clear();
+
     for (VkSemaphore s : imageAvailableSemaphores_) {
         vkDestroySemaphore(device, s, nullptr);
     }
@@ -116,32 +163,236 @@ void Renderer::waitIdle() const {
     vkDeviceWaitIdle(context_.device());
 }
 
-MeshHandle Renderer::addMesh(const MeshData& meshData, bool log) {
-    // Le Mesh valide les donnees et leve une exception si elles sont
-    // incoherentes, avant toute allocation durable. Construit AVANT de toucher
-    // aux tableaux : si la construction echoue, aucun emplacement n'a ete
-    // consomme.
-    auto mesh = std::make_unique<Mesh>(context_, *this, meshData, log);
+MeshHandle Renderer::registerMesh(std::unique_ptr<Mesh> mesh) {
     ++liveMeshCount_;
-
     if (!freeMeshSlots_.empty()) {
         const MeshHandle handle = freeMeshSlots_.back();
         freeMeshSlots_.pop_back();
         meshes_[handle] = std::move(mesh);
         return handle;
     }
-
     meshes_.push_back(std::move(mesh));
     return static_cast<MeshHandle>(meshes_.size() - 1);
+}
+
+Renderer::RangeWrite Renderer::beginRangeWrite(const GpuRange& range) {
+    RangeWrite write;
+    write.range = range;
+    if (range.mapped != nullptr) {
+        // Memoire unifiee : on ecrit la ou le GPU lira. Sans danger pour la
+        // synchronisation - une plage n'est rendue au pool qu'une fois que plus
+        // aucune image en vol ne la lit (Renderer::removeMesh), et l'ecriture
+        // hote est visible du GPU a la soumission suivante (memoire coherente).
+        write.destination = range.mapped;
+        return write;
+    }
+    write.staging = std::make_unique<VulkanBuffer>(
+        context_, range.size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    write.staging->map();
+    write.destination = write.staging->mapped();
+    return write;
+}
+
+void Renderer::finishRangeWrite(RangeWrite& write) {
+    if (write.staging) {
+        write.staging->unmap();
+        enqueueCopy(std::move(write.staging), write.range.buffer, write.range.offset);
+    }
+    write.destination = nullptr;
+}
+
+MeshHandle Renderer::addMesh(const MeshData& meshData, bool log) {
+    // --- Validation AVANT toute allocation ----------------------------------
+    // Un index hors limites ne produit pas d'erreur a la creation du buffer :
+    // il se manifesterait au draw, sous forme de lecture hors du vertex buffer
+    // (comportement indefini cote GPU). Mieux vaut refuser ici, avec un message
+    // qui dit quoi. Si la geometrie est refusee, aucun emplacement n'a ete
+    // consomme.
+    if (meshData.vertices.empty()) {
+        throw std::runtime_error("Mesh vide : aucun sommet (" + meshData.name + ").");
+    }
+    if (meshData.indices.empty()) {
+        throw std::runtime_error("Mesh vide : aucun index (" + meshData.name + ").");
+    }
+    if (meshData.indices.size() % 3 != 0) {
+        throw std::runtime_error(
+            "Mesh non triangule : " + std::to_string(meshData.indices.size()) +
+            " index, ce qui n'est pas un multiple de 3 (" + meshData.name + ").");
+    }
+    const auto vertexCount = static_cast<uint32_t>(meshData.vertices.size());
+    for (uint32_t index : meshData.indices) {
+        if (index >= vertexCount) {
+            throw std::runtime_error(
+                "Index hors limites dans le mesh : " + std::to_string(index) +
+                " pour " + std::to_string(vertexCount) + " sommets (" + meshData.name + ").");
+        }
+    }
+    const auto indexCount = static_cast<uint32_t>(meshData.indices.size());
+
+    // PHASE 30 : sommets au format ObjectVertex (44 octets, conversion exacte)
+    // et indices en uint16 des que le maillage a au plus 65 536 sommets - le
+    // cas de TOUS les maillages d'objets du jeu. Les valeurs sont les memes,
+    // seule leur largeur change.
+    const bool shortIndices = vertexCount <= 65536u;
+    const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(vertexCount) * sizeof(ObjectVertex);
+    const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(indexCount) *
+                                    (shortIndices ? sizeof(uint16_t) : sizeof(uint32_t));
+
+    const GpuRange vertexRange = geometryPool_->allocate(vertexBytes);
+    GpuRange indexRange;
+    try {
+        indexRange = geometryPool_->allocate(indexBytes);
+    } catch (...) {
+        geometryPool_->release(vertexRange);
+        throw;
+    }
+
+    RangeWrite vertexWrite = beginRangeWrite(vertexRange);
+    auto* vertices = static_cast<ObjectVertex*>(vertexWrite.destination);
+    for (uint32_t v = 0; v < vertexCount; ++v) {
+        vertices[v] = toObjectVertex(meshData.vertices[v]);
+    }
+    finishRangeWrite(vertexWrite);
+
+    RangeWrite indexWrite = beginRangeWrite(indexRange);
+    if (shortIndices) {
+        auto* indices = static_cast<uint16_t*>(indexWrite.destination);
+        for (uint32_t k = 0; k < indexCount; ++k) {
+            indices[k] = static_cast<uint16_t>(meshData.indices[k]);
+        }
+    } else {
+        std::memcpy(indexWrite.destination, meshData.indices.data(),
+                    static_cast<std::size_t>(indexBytes));
+    }
+    finishRangeWrite(indexWrite);
+
+    if (log) {
+        logInfo("Mesh charge sur le GPU : " + meshData.name + " - " +
+                std::to_string(vertexCount) + " sommets, " +
+                std::to_string(indexCount / 3) + " triangles, " +
+                std::to_string((vertexBytes + indexBytes + 1023) / 1024) + " Ko.");
+    }
+    return registerMesh(std::make_unique<Mesh>(
+        *geometryPool_, VertexLayout::Object, vertexRange, vertexCount, indexRange,
+        shortIndices ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32, indexCount, true));
+}
+
+MeshHandle Renderer::addTerrainMesh(const std::vector<TerrainVertex>& vertices,
+                                    const std::vector<uint32_t>& indices,
+                                    const std::string& name, bool log) {
+    if (vertices.empty() || indices.empty() || indices.size() % 3 != 0) {
+        throw std::runtime_error("Terrain : geometrie vide ou non triangulee (" + name + ").");
+    }
+    const auto vertexCount = static_cast<uint32_t>(vertices.size());
+    for (uint32_t index : indices) {
+        if (index >= vertexCount) {
+            throw std::runtime_error("Terrain : index " + std::to_string(index) +
+                                     " hors des " + std::to_string(vertexCount) +
+                                     " sommets (" + name + ").");
+        }
+    }
+    const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(vertexCount) * sizeof(TerrainVertex);
+    const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(indices.size()) * sizeof(uint32_t);
+    const GpuRange vertexRange = geometryPool_->allocate(vertexBytes);
+    GpuRange indexRange;
+    try {
+        indexRange = geometryPool_->allocate(indexBytes);
+    } catch (...) {
+        geometryPool_->release(vertexRange);
+        throw;
+    }
+    RangeWrite vertexWrite = beginRangeWrite(vertexRange);
+    std::memcpy(vertexWrite.destination, vertices.data(), static_cast<std::size_t>(vertexBytes));
+    finishRangeWrite(vertexWrite);
+    RangeWrite indexWrite = beginRangeWrite(indexRange);
+    std::memcpy(indexWrite.destination, indices.data(), static_cast<std::size_t>(indexBytes));
+    finishRangeWrite(indexWrite);
+
+    if (log) {
+        logInfo("Terrain charge sur le GPU : " + name + " - " + std::to_string(vertexCount) +
+                " sommets, " + std::to_string(indices.size() / 3) + " triangles, " +
+                std::to_string((vertexBytes + indexBytes) / (1024 * 1024)) + " Mo.");
+    }
+    return registerMesh(std::make_unique<Mesh>(
+        *geometryPool_, VertexLayout::Terrain, vertexRange, vertexCount, indexRange,
+        VK_INDEX_TYPE_UINT32, static_cast<uint32_t>(indices.size()), true));
+}
+
+uint32_t Renderer::addSharedIndices(const std::vector<uint32_t>& indices) {
+    if (indices.empty() || indices.size() % 3 != 0) {
+        throw std::runtime_error("Topologie partagee vide ou non triangulee.");
+    }
+    const uint32_t highest = *std::max_element(indices.begin(), indices.end());
+    const bool shortIndices = highest <= 0xFFFFu;
+    SharedIndices shared;
+    shared.count = static_cast<uint32_t>(indices.size());
+    shared.type = shortIndices ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+    shared.range = geometryPool_->allocate(static_cast<VkDeviceSize>(indices.size()) *
+                                           (shortIndices ? sizeof(uint16_t) : sizeof(uint32_t)));
+    RangeWrite write = beginRangeWrite(shared.range);
+    if (shortIndices) {
+        auto* out = static_cast<uint16_t*>(write.destination);
+        for (std::size_t k = 0; k < indices.size(); ++k) {
+            out[k] = static_cast<uint16_t>(indices[k]);
+        }
+    } else {
+        std::memcpy(write.destination, indices.data(), indices.size() * sizeof(uint32_t));
+    }
+    finishRangeWrite(write);
+    sharedIndices_.push_back(shared);
+    return static_cast<uint32_t>(sharedIndices_.size() - 1);
+}
+
+Renderer::TerrainMeshWrite Renderer::beginTerrainMesh(uint32_t vertexCount,
+                                                      uint32_t sharedIndices) {
+    if (sharedIndices >= sharedIndices_.size() || vertexCount == 0) {
+        throw std::runtime_error("Tuile de terrain : topologie partagee inconnue.");
+    }
+    const SharedIndices& shared = sharedIndices_[sharedIndices];
+    const GpuRange range = geometryPool_->allocate(
+        static_cast<VkDeviceSize>(vertexCount) * sizeof(TerrainVertex));
+    RangeWrite write = beginRangeWrite(range);
+
+    TerrainMeshWrite result;
+    result.vertices = static_cast<TerrainVertex*>(write.destination);
+    result.mesh = registerMesh(std::make_unique<Mesh>(
+        *geometryPool_, VertexLayout::Terrain, range, vertexCount, shared.range,
+        shared.type, shared.count, false));
+    if (write.staging) {
+        pendingTerrainWrites_.emplace(result.mesh, std::move(write));
+    }
+    return result;
+}
+
+void Renderer::endTerrainMesh(MeshHandle mesh) {
+    const auto it = pendingTerrainWrites_.find(mesh);
+    if (it == pendingTerrainWrites_.end()) {
+        return; // ecriture directe : rien a livrer, le GPU lit deja ces octets
+    }
+    finishRangeWrite(it->second);
+    pendingTerrainWrites_.erase(it);
+}
+
+void Renderer::setTerrainGrid(float origin, float spacing, uint32_t cells) {
+    terrainGrid_ = glm::vec4(origin, spacing, static_cast<float>(cells), 0.0f);
+}
+
+std::string Renderer::geometryLine() const {
+    return "Geometrie : " + geometryPool_->statsLine();
 }
 
 void Renderer::removeMesh(MeshHandle handle) {
     if (handle >= meshes_.size() || !meshes_[handle]) {
         return; // deja libere, ou poignee invalide : ne rien faire est sans risque
     }
+    // PHASE 30 : une tuile commencee mais jamais livree (ecriture en echec)
+    // abandonne son staging : il n'y a rien a copier.
+    pendingTerrainWrites_.erase(handle);
+
     // Le mesh sort de la table tout de suite (sa poignee redevient disponible)
-    // mais ses buffers Vulkan survivent le temps que les frames deja soumises
-    // aient fini de les lire. Voir le commentaire de declaration.
+    // mais ses plages de geometrie survivent le temps que les frames deja
+    // soumises aient fini de les lire. Voir le commentaire de declaration.
     retiredMeshes_.push_back({ std::move(meshes_[handle]), kMaxFramesInFlight + 1 });
     freeMeshSlots_.push_back(handle);
     --liveMeshCount_;
@@ -441,6 +692,7 @@ void Renderer::updateUniformBuffer(uint32_t frameIndex, const Camera& camera) {
     ubo.precip = precip_;
     ubo.fall = fall_;
     ubo.detail = detail_;
+    ubo.terrainGrid = terrainGrid_;
 
     std::memcpy(uniformBuffers_[frameIndex]->mapped(), &ubo, sizeof(ubo));
 }
@@ -524,13 +776,15 @@ void Renderer::destroyImageSyncObjects() {
 //   - la tuile est lisible DES CETTE FRAME : le repli sur l'ancetre ne sert donc
 //     qu'aux tuiles pas encore CONSTRUITES (budget), pas a une latence de
 //     transfert.
-void Renderer::enqueueCopy(std::unique_ptr<VulkanBuffer> staging, VkBuffer destination) {
+void Renderer::enqueueCopy(std::unique_ptr<VulkanBuffer> staging, VkBuffer destination,
+                           VkDeviceSize destinationOffset) {
     if (!staging || destination == VK_NULL_HANDLE) {
         return;
     }
     PendingCopy copy;
     copy.size = staging->size();
     copy.destination = destination;
+    copy.destinationOffset = destinationOffset;
     copy.staging = std::move(staging);
     stagingBytesInFlight_ += static_cast<std::size_t>(copy.size);
     pendingCopies_.push_back(std::move(copy));
@@ -565,8 +819,10 @@ void Renderer::flushCopiesNow() {
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
+    recordCopyAfterReadBarrier(commandBuffer);
     for (const PendingCopy& copy : pendingCopies_) {
         VkBufferCopy region{};
+        region.dstOffset = copy.destinationOffset;
         region.size = copy.size;
         vkCmdCopyBuffer(commandBuffer, copy.staging->handle(), copy.destination,
                         1, &region);
@@ -603,8 +859,10 @@ void Renderer::recordPendingCopies(VkCommandBuffer commandBuffer) {
         return;
     }
 
+    recordCopyAfterReadBarrier(commandBuffer);
     for (PendingCopy& copy : pendingCopies_) {
         VkBufferCopy region{};
+        region.dstOffset = copy.destinationOffset;
         region.size = copy.size;
         vkCmdCopyBuffer(commandBuffer, copy.staging->handle(), copy.destination,
                         1, &region);
@@ -694,9 +952,56 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
     // n'est lie qu'une fois par materiau reellement utilise (au plus deux fois
     // par frame ici). Avec quelques dizaines d'objets, ce tri "par balayage"
     // coute moins cher qu'un vrai tri, et evite de copier la liste.
-    for (uint32_t m = 0; m < kMaterialCount; ++m) {
-        const Material material = static_cast<Material>(m);
+    //
+    // PHASE 30 : le TERRAIN en dernier. Son shader de fragment est le plus
+    // lourd du jeu (orthophoto, micro-relief, adret/ubac, brouillard) ; dessine
+    // apres les troncs, les houppiers et l'herbe, il trouve leur profondeur
+    // deja ecrite et le test de profondeur PRECOCE ecarte ses fragments caches
+    // avant de les ombrer. Tout est opaque et le test est LESS : l'ordre ne
+    // change l'image qu'a profondeur RIGOUREUSEMENT EGALE - le pied d'un brin
+    // ou d'un tronc, pose exactement sur la surface du sol. Mesure : 24 pixels
+    // sur 921 600 en foret, et une variante qui rend ces egalites au terrain
+    // redonne l'image de reference au bit pres (NOTES-PHASE30.md). Gain : -26 %
+    // de temps de rendu en foret (lavapipe).
+    static constexpr std::array<Material, kMaterialCount> kDrawOrder{
+        Material::Object, Material::Foliage, Material::Terrain };
+
+    // PHASE 30 : liaisons de buffers EVITEES quand elles ne changent rien. Les
+    // tuiles de terrain partagent une seule topologie : elle est liee une fois
+    // par image au lieu d'une fois par tuile. Les liaisons survivent aux
+    // changements de pipeline (etat du command buffer, pas du pipeline).
+    VkBuffer boundVertexBuffer = VK_NULL_HANDLE;
+    VkDeviceSize boundVertexOffset = 0;
+    VkBuffer boundIndexBuffer = VK_NULL_HANDLE;
+    VkDeviceSize boundIndexOffset = 0;
+    VkIndexType boundIndexType = VK_INDEX_TYPE_MAX_ENUM;
+    // Decalage de LIAISON plutot que vertexOffset dans le draw : gl_VertexIndex
+    // reste ainsi l'indice LOCAL du sommet dans son maillage, ce dont
+    // terrain.vert se sert pour retrouver sa place dans la grille de la tuile.
+    const auto bindMesh = [&](const Mesh& mesh) {
+        const GpuRange& vertices = mesh.vertexRange();
+        if (vertices.buffer != boundVertexBuffer || vertices.offset != boundVertexOffset) {
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertices.buffer, &vertices.offset);
+            boundVertexBuffer = vertices.buffer;
+            boundVertexOffset = vertices.offset;
+        }
+        const GpuRange& indices = mesh.indexRange();
+        if (indices.buffer != boundIndexBuffer || indices.offset != boundIndexOffset ||
+            mesh.indexType() != boundIndexType) {
+            vkCmdBindIndexBuffer(commandBuffer, indices.buffer, indices.offset, mesh.indexType());
+            boundIndexBuffer = indices.buffer;
+            boundIndexOffset = indices.offset;
+            boundIndexType = mesh.indexType();
+        }
+    };
+
+    for (const Material material : kDrawOrder) {
+        const uint32_t m = static_cast<uint32_t>(material);
         bool pipelineBound = false;
+        // PHASE 30 : un maillage de terrain (16 octets par sommet) ne se lit
+        // qu'avec le pipeline du terrain, et reciproquement.
+        const VertexLayout expectedLayout = (material == Material::Terrain)
+            ? VertexLayout::Terrain : VertexLayout::Object;
 
         for (const DrawItem& item : items) {
             if (item.material != material) {
@@ -708,6 +1013,9 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
                 // de laisser le driver lire hors du tableau (ou de dereferencer
                 // un pointeur nul). Signaler serait bruyant a 60 Hz.
                 continue;
+            }
+            if (meshes_[item.mesh]->layout() != expectedLayout) {
+                continue; // meme raison : le GPU lirait des octets d'un autre format
             }
 
             if (!pipelineBound) {
@@ -723,17 +1031,17 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
                 pipelineBound = true;
             }
 
-            // Transformation et parametres propres a cet objet. Les deux sont
+            // Transformation et parametres propres a cet objet. Tous sont
             // pousses d'un seul coup : ils sont contigus dans DrawItemPush,
             // dont le layout reproduit exactement le bloc push_constant des
             // shaders (voir DrawItem.hpp).
-            const DrawItemPush push{ item.model, item.params };
+            const DrawItemPush push{ item.model, item.params, item.grid };
             vkCmdPushConstants(commandBuffer, pipelines_[m]->layout(),
                                VK_SHADER_STAGE_VERTEX_BIT, 0,
                                static_cast<uint32_t>(sizeof(DrawItemPush)), &push);
 
             const Mesh& mesh = *meshes_[item.mesh];
-            mesh.bind(commandBuffer);
+            bindMesh(mesh);
             mesh.draw(commandBuffer);
         }
 
@@ -746,7 +1054,8 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
             if (item.material != material || item.count == 0) {
                 continue;
             }
-            if (item.mesh >= meshes_.size() || !meshes_[item.mesh]) {
+            if (item.mesh >= meshes_.size() || !meshes_[item.mesh] ||
+                meshes_[item.mesh]->layout() != expectedLayout) {
                 continue;
             }
 
@@ -765,7 +1074,7 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
                                static_cast<uint32_t>(sizeof(DrawItemPush)), &push);
 
             const Mesh& mesh = *meshes_[item.mesh];
-            mesh.bind(commandBuffer);
+            bindMesh(mesh);
 
             // Binding 1 : la tranche du buffer d'instances qui appartient a cet
             // objet. L'offset a ete calcule par uploadInstances, dans le meme
