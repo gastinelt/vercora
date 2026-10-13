@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <istream>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,12 @@ struct TextureData {
     // journal de demarrage : c'est le chiffre qui dit si la texture est a la
     // hauteur du niveau de detail du terrain.
     double metresPerTexel() const;
+
+    // PHASE 30. Octets de TOUTE la chaine de mipmaps, deduits des niveaux :
+    // c'est la taille de `pixels` une fois charge, et celle du staging.
+    uint64_t payloadSize() const {
+        return mips.empty() ? 0 : mips.back().offset + mips.back().size;
+    }
 };
 
 // Charge un .vcto. Lance std::runtime_error avec un message exploitable si le
@@ -64,6 +71,20 @@ struct TextureData {
 // niveaux impossible, taille de charge utile ne correspondant pas aux niveaux
 // annonces, ...).
 TextureData loadTextureFile(const std::string& path);
+
+// PHASE 30. Les deux moities de loadTextureFile, pour ne jamais tenir la
+// charge utile en RAM : l'en-tete d'abord (memes controles, taille du fichier
+// comprise, `pixels` reste VIDE), puis la lecture des `payloadSize()` octets
+// directement la ou l'appelant les veut - en pratique le staging mappe de la
+// texture GPU (Renderer::setTerrainTextureFromFile). Sur l'orthophoto de la
+// zone, c'est une copie de 42 Mo de moins au chargement, et autant de pic RAM.
+TextureData loadTextureFileHeader(const std::string& path);
+void readTexturePayload(const std::string& path, const TextureData& header, void* destination);
+
+// Variante par TRANCHE, sur un fichier deja ouvert : `bytes` octets de la
+// charge utile a partir de son octet `offset`. Sert au televersement par
+// bandes de Texture (staging de 4 Mo au plus).
+void readTexturePayload(std::istream& file, uint64_t offset, uint64_t bytes, void* destination);
 
 // Nombre d'octets d'un niveau de mipmap pour un format donne. Expose parce que
 // c'est la seule formule qui lie les deux formats a leur taille, et que le

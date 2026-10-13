@@ -1,6 +1,7 @@
 #include "renderer/Renderer.hpp"
 
 #include "assets/DetailNoise.hpp"
+#include "assets/TextureFile.hpp"
 
 #include "core/Camera.hpp"
 #include "core/Logger.hpp"
@@ -20,6 +21,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 
 namespace vercora {
@@ -607,6 +609,26 @@ void Renderer::setTerrainTexture(const TextureData& data) {
             std::to_string(data.height) + ", " +
             std::to_string(terrainTexture_->deviceSize() / (1024 * 1024)) +
             " Mo sur le GPU.");
+}
+
+void Renderer::setTerrainTextureFromFile(const TextureData& header, const std::string& path) {
+    waitIdle();
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("Texture : fichier introuvable ou illisible : " + path);
+    }
+    terrainTexture_ = std::make_unique<Texture>(
+        context_, commandPool_, context_.graphicsQueue(), header,
+        [&file](void* destination, uint64_t offset, uint64_t bytes) {
+            readTexturePayload(file, offset, bytes, destination);
+        });
+    writeTextureDescriptors();
+
+    logInfo("Orthophoto reliee au terrain : " + std::to_string(header.width) + "x" +
+            std::to_string(header.height) + ", " +
+            std::to_string(terrainTexture_->deviceSize() / (1024 * 1024)) +
+            " Mo sur le GPU, lue par tranches directement dans le staging.");
 }
 
 void Renderer::setOrthoMix(float mix) {

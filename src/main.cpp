@@ -1351,9 +1351,12 @@ int main(int argc, char** argv) {
                         " -i data/ortho -o " + orthoPath);
             } else {
                 try {
-                    const TextureData ortho = loadTextureFile(orthoPath);
+                    // PHASE 30 : l'en-tete seul d'abord (controle d'emprise), puis
+                    // les 42 Mo de texels lus directement dans le staging de la
+                    // texture - jamais tenus en RAM a cote.
+                    const TextureData ortho = loadTextureFileHeader(orthoPath);
                     if (orthoMatchesTerrain(ortho, *heightmap)) {
-                        renderer.setTerrainTexture(ortho);
+                        renderer.setTerrainTextureFromFile(ortho, orthoPath);
                         renderer.setOrthoMix(1.0f);
                         groundDetailPattern = ortho.metresPerTexel();
                         logInfo("Orthophoto : " +

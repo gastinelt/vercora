@@ -3199,6 +3199,62 @@ void testTextureFile() {
         threw = true;
     }
     check(threw, "Refus : fichier .vcto absent");
+
+    // --- PHASE 30 : en-tete seul, puis charge utile lue a la demande --------
+    // Le chargement de l'orthophoto ne tient plus la charge utile en RAM : il
+    // lit l'en-tete, puis des TRANCHES directement dans le staging. Les deux
+    // chemins doivent rendre exactement les memes octets que loadTextureFile.
+    {
+        const std::string path =
+            (std::filesystem::temp_directory_path() / "vercora_phase30_test.vcto").string();
+        std::vector<unsigned char> payload;
+        const uint32_t width = 8;
+        const uint32_t height = 4;
+        uint32_t levels = 0;
+        for (uint32_t w = width, h = height;; w = std::max(1u, w / 2), h = std::max(1u, h / 2)) {
+            for (uint32_t k = 0; k < w * h * 4; ++k) {
+                payload.push_back(static_cast<unsigned char>((payload.size() * 37u + 11u) & 0xFFu));
+            }
+            ++levels;
+            if (w == 1 && h == 1) {
+                break;
+            }
+        }
+        unsigned char header[128] = {};
+        std::memcpy(header, "VCTO", 4);
+        const uint32_t fields[5] = { 1u, width, height, levels, 0u /* RGBA8 */ };
+        std::memcpy(header + 4, fields, sizeof(fields));
+        const double extent[4] = { 899000.0, 6435000.0, 904000.0, 6440000.0 };
+        std::memcpy(header + 24, extent, sizeof(extent));
+        const uint32_t epsg = 2154u;
+        std::memcpy(header + 56, &epsg, sizeof(epsg));
+        {
+            std::ofstream out(path, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(header), sizeof(header));
+            out.write(reinterpret_cast<const char*>(payload.data()),
+                      static_cast<std::streamsize>(payload.size()));
+        }
+
+        const TextureData full = loadTextureFile(path);
+        const TextureData headerOnly = loadTextureFileHeader(path);
+        check(full.pixels == payload && full.payloadSize() == payload.size(),
+              "Phase 30 : loadTextureFile rend la charge utile complete");
+        check(headerOnly.pixels.empty() && headerOnly.payloadSize() == payload.size() &&
+                  headerOnly.mips.size() == full.mips.size(),
+              "Phase 30 : l'en-tete seul decrit la meme chaine, sans aucun texel");
+
+        std::vector<unsigned char> whole(payload.size());
+        readTexturePayload(path, headerOnly, whole.data());
+        std::vector<unsigned char> banded(payload.size());
+        std::ifstream in(path, std::ios::binary);
+        for (uint64_t offset = 0; offset < payload.size(); offset += 24) {
+            const uint64_t bytes = std::min<uint64_t>(24, payload.size() - offset);
+            readTexturePayload(in, offset, bytes, banded.data() + offset);
+        }
+        check(whole == payload && banded == payload,
+              "Phase 30 : lecture directe et lecture par tranches = memes octets");
+        std::filesystem::remove(path);
+    }
 }
 
 void testGrassMesh() {

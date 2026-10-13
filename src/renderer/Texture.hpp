@@ -9,6 +9,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <functional>
 
 namespace vercora {
 
@@ -44,6 +45,19 @@ public:
     // l'orthophoto - voir createSampler.
     Texture(VulkanContext& context, VkCommandPool commandPool, VkQueue queue,
             const TextureData& data, bool repeat = false);
+
+    // PHASE 30. Source des texels : ecrit `bytes` octets de la charge utile, a
+    // partir de l'octet `offset` (0 = debut du niveau 0, meme rangement que
+    // TextureData::pixels), dans `destination` - le staging mappe.
+    using PixelSource =
+        std::function<void(void* destination, uint64_t offset, uint64_t bytes)>;
+
+    // PHASE 30. Meme texture, mais les texels ne sont PAS dans `layout` (son
+    // `pixels` peut etre vide) : `source` les ecrit directement dans le
+    // staging, tranche par tranche. C'est ce qui permet de lire l'orthophoto
+    // depuis son fichier sans jamais la tenir en RAM.
+    Texture(VulkanContext& context, VkCommandPool commandPool, VkQueue queue,
+            const TextureData& layout, const PixelSource& source, bool repeat = false);
     ~Texture();
 
     Texture(const Texture&) = delete;
@@ -69,7 +83,7 @@ public:
 private:
     void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format);
     void uploadAndTransition(VkCommandPool commandPool, VkQueue queue,
-                             const TextureData& data);
+                             const TextureData& data, const PixelSource& source);
     void createView(VkFormat format, uint32_t mipLevels);
     void createSampler(uint32_t mipLevels, bool repeat);
 
