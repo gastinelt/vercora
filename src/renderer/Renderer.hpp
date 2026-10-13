@@ -3,6 +3,7 @@
 #include "renderer/DrawItem.hpp"
 #include "renderer/GpuBufferPool.hpp"
 #include "renderer/GpuVertex.hpp"
+#include "renderer/Mesh.hpp" // VertexLayout
 #include "renderer/Pipeline.hpp" // pour ShaderSet
 #include "renderer/VulkanBuffer.hpp" // pour BufferUploader
 
@@ -23,7 +24,6 @@ class VulkanContext;
 class Window;
 class SwapChain;
 class Camera;
-class Mesh;
 class Texture;
 struct MeshData;
 struct TextureData;
@@ -384,6 +384,12 @@ private:
     // Inscrit un Mesh dans la table et rend sa poignee (emplacement libre
     // reutilise s'il y en a un).
     MeshHandle registerMesh(std::unique_ptr<Mesh> mesh);
+
+    // Reserve les deux plages d'un maillage a topologie propre et les confie
+    // AUSSITOT a un Mesh, qui les rendra au pool si la suite echoue.
+    std::unique_ptr<Mesh> allocateMesh(VertexLayout layout, VkDeviceSize vertexBytes,
+                                       uint32_t vertexCount, VkDeviceSize indexBytes,
+                                       VkIndexType indexType, uint32_t indexCount);
 
     VulkanContext& context_;
     Window& window_;

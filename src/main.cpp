@@ -1369,7 +1369,7 @@ int main(int argc, char** argv) {
                     if (orthoMatchesTerrain(ortho, *heightmap)) {
                         renderer.setTerrainTextureFromFile(ortho, orthoPath);
                         renderer.setOrthoMix(1.0f);
-                        groundDetailPattern = ortho.metresPerTexel();
+                        groundDetailPattern = static_cast<float>(ortho.metresPerTexel());
                         logInfo("Orthophoto : " +
                                 std::to_string(ortho.metresPerTexel()) +
                                 " m/texel pour un terrain au pas de " +
@@ -2383,7 +2383,7 @@ int main(int argc, char** argv) {
             if (loopSeconds - lastResourceLog >= 10.0) {
                 lastResourceLog = loopSeconds;
                 logInfo("Ressources (PHASE 30) : " + processMemoryLine() + ", " +
-                        context.gpuMemoryLine() + ".");
+                        context.gpuMemoryLine() + ". " + renderer.geometryLine() + ".");
             }
 
             const double now = glfwGetTime();
@@ -4023,7 +4023,7 @@ int main(int argc, char** argv) {
         // "vivants" sont donc ceux du jeu en regime etabli, les pics ceux de la
         // session entiere.
         logInfo("Ressources en fin de partie (PHASE 30) : " + processMemoryLine() + ", " +
-                context.gpuMemoryLine() + ".");
+                context.gpuMemoryLine() + ". " + renderer.geometryLine() + ".");
 
         if (frameProfile.frames > 0) {
             const auto per = [&](uint64_t total) {

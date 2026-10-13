@@ -168,10 +168,10 @@ uint32_t GpuBufferPool::blockCount() const {
 std::string GpuBufferPool::statsLine() const {
     char text[160];
     std::snprintf(text, sizeof(text),
-                  "%.1f Mo de geometrie dans %u bloc(s) de %.1f Mo au total%s",
-                  static_cast<double>(usedBytes_) / (1024.0 * 1024.0), blockCount(),
-                  static_cast<double>(capacityBytes_) / (1024.0 * 1024.0),
-                  mapped_ ? ", ecriture directe (memoire unifiee)" : ", par staging");
+                  "%.1f Mo utilises sur %.1f Mo alloues en %u bloc(s), %s",
+                  static_cast<double>(usedBytes_) / (1024.0 * 1024.0),
+                  static_cast<double>(capacityBytes_) / (1024.0 * 1024.0), blockCount(),
+                  mapped_ ? "ecriture directe (memoire unifiee)" : "televersement par staging");
     return text;
 }
 
