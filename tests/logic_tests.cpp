@@ -10235,6 +10235,13 @@ void testGpuFormatsPhase30() {
         odd.resolution = 128;
         odd.worldSize = 127.0f;
         odd.seed = 3031u;
+        // Assez grande pour que des tuiles de niveau 2 et 3 soient INTERIEURES
+        // (chemin rapide de writeTerrainNodeVertices a plusieurs pas).
+        Heightmap::Params large;
+        large.resolution = 2049;
+        large.worldSize = 4096.0f;
+        large.amplitude = 900.0f;
+        large.seed = 3033u;
         TerrainQuadtree::Params qparams;
         qparams.nodeCells = 64;
 
@@ -10242,7 +10249,9 @@ void testGpuFormatsPhase30() {
         bool positionsExact = true;
         bool uvExact = true;
         uint32_t nodesChecked = 0;
-        for (const Heightmap::Params& hp : { even, odd }) {
+        uint32_t fastNodes = 0;
+        uint32_t fastStrides = 0; // masque des pas couverts par le chemin rapide
+        for (const Heightmap::Params& hp : { even, odd, large }) {
             const Heightmap heightmap(hp);
             const TerrainQuadtree quadtree(heightmap, qparams);
             const uint32_t verts = qparams.nodeCells + 1;
@@ -10250,6 +10259,10 @@ void testGpuFormatsPhase30() {
             const float origin = heightmap.worldCoord(0);
             std::vector<TerrainVertex> written(static_cast<std::size_t>(verts) * verts);
             for (uint32_t index = 0; index < quadtree.nodeCount(); ++index) {
+                if (terrainNodeUsesFastPath(heightmap, quadtree, index)) {
+                    ++fastNodes;
+                    fastStrides |= quadtree.node(index).stride;
+                }
                 for (const bool cached : { true, false }) {
                     const MeshData reference =
                         terrainNodeMeshData(heightmap, quadtree, index, false, cached);
@@ -10283,7 +10296,9 @@ void testGpuFormatsPhase30() {
                 ++nodesChecked;
             }
         }
-        check(nodesChecked > 80, "Tuiles : toutes les tuiles des deux grilles verifiees");
+        check(nodesChecked > 400, "Tuiles : toutes les tuiles des trois grilles verifiees");
+        check(fastNodes > 0 && fastNodes < nodesChecked && (fastStrides & 0xFu) == 0xFu,
+              "Tuiles : chemin rapide ET chemin de reference exerces (pas 1, 2, 4 et 8)");
         check(identical,
               "Tuiles : writeTerrainNodeVertices == toTerrainVertex(reference), au bit pres");
         check(positionsExact,

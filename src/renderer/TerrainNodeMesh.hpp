@@ -83,4 +83,12 @@ void writeTerrainNodeVertices(const Heightmap& heightmap, const TerrainQuadtree&
                               uint32_t nodeIndex, TerrainVertex* out,
                               bool reuseParentGrid = true);
 
+// PHASE 30. true si writeTerrainNodeVertices prend le chemin RAPIDE pour ce
+// noeud : une tuile assez loin du bord du terrain pour qu'aucun des
+// echantillons qu'elle lit (ses sommets, leurs voisins au pas du noeud, et
+// ceux de la grille du parent au pas double) ne soit ecrete. Expose pour que
+// les tests verifient qu'ils couvrent bien les deux chemins.
+bool terrainNodeUsesFastPath(const Heightmap& heightmap, const TerrainQuadtree& quadtree,
+                             uint32_t nodeIndex);
+
 } // namespace vercora
