@@ -153,3 +153,160 @@ NON RETENU, et pourquoi :
   25 Mo de mieux au pic du survol, pour un changement de modele d'entree, un
   descripteur de plus et un shader a bords exacts. A reprendre si le pas
   LiDAR s'affine.
+
+---------------------------------------------------------------------------
+
+## 5. Execution : ce qui a ete fait
+
+Cinq commits sur la branche, chacun valide avant le suivant (tests headless,
+couches de validation Khronos, comparaison d'images au pixel pres).
+
+### P6 - ordre de dessin et culling (Renderer, Pipeline)
+- Ordre objets -> vegetation -> TERRAIN (`kDrawOrder`). Le shader de fragment
+  du terrain est le plus lourd du jeu ; dessine en dernier, ses fragments
+  caches par les troncs et l'herbe sont ecartes par le test de profondeur
+  precoce. Foret : -26 % de temps de rendu a lui seul.
+- `ShaderSet::cullBackFaces`, terrain seulement (champ de hauteurs : un oeil
+  au-dessus du relief rencontre toujours une face avant d'abord).
+  `frontFace = COUNTER_CLOCKWISE` une fois l'axe Y de la projection retourne,
+  verifie par le calcul d'aire de la spec ET a l'image.
+
+### P1 a P4 - geometrie compacte et pool (GpuVertex, GpuBufferPool, Mesh)
+- `renderer/GpuVertex.hpp` : `ObjectVertex` (44 o, conversion exacte de
+  `Vertex`) et `TerrainVertex` (16 o : altitude, altitude cible, normales x/z
+  en snorm16). `Vertex` (68 o) reste le format de TRAVAIL cote CPU : aucun
+  generateur ni aucun test n'a change de format.
+- `terrain.vert` recalcule x/z, la cible de morphing et l'UV depuis
+  `gl_VertexIndex` et `DrawItem::grid` (ix0, iz0, pas, sommets par rangee) +
+  `UniformBufferObject::terrainGrid` (origine, pas, cellules). `precise`
+  interdit la fusion en FMA : les positions sont celles de
+  `Heightmap::worldCoord` au bit pres (verifie en C++ par les tests).
+- Topologie des tuiles televersee UNE fois en uint16 (`addSharedIndices`) ;
+  indices des objets en uint16 ; une seule liaison d'indices par image pour
+  tout le terrain (`bindMesh` saute les liaisons redondantes).
+- `GpuBufferPool` (blocs de 4 Mo, `RangeAllocator` premier ajustement, bloc
+  dedie au-dela d'un demi-bloc, un bloc vide garde en reserve) : un `Mesh` ne
+  possede plus de buffer mais des PLAGES, rendues au pool par le meme retrait
+  differe qu'avant (kMaxFramesInFlight + 1 images).
+- Memoire unifiee + GPU integre ou logiciel (`preferDirectGeometryWrites`) :
+  blocs mappes, la geometrie est ECRITE la ou le GPU la lit - ni staging, ni
+  copie, ni barriere. GPU discret : staging de la Phase 12, avec une barriere
+  d'execution VERTEX_INPUT -> TRANSFER avant les copies (une plage recyclee a
+  ete lue par des images precedentes). `--force-staging` eprouve ce chemin.
+- `writeTerrainNodeVertices` : les sommets d'une tuile ecrits directement au
+  format compact (plus de `MeshData` de 287 Ko par tuile, plus de copie).
+  `terrainNodeMeshData` reste la reference testee : les deux partagent le meme
+  parcours (`forEachNodeVertex`), ils ne peuvent pas diverger.
+- `--no-lod` : `terrainGpuMeshData` produit directement le format compact
+  (1,7 Go de `MeshData` en moins au pic sur la zone au pas de 1 m).
+
+### P5 - orthophoto (TextureFile, Texture)
+- `loadTextureFileHeader` + `readTexturePayload` (entier ou par tranche) ;
+  `loadTextureFile` en est la composition.
+- `Texture` remplit son staging par une source et le REUTILISE par bandes de
+  rangees de blocs (4 Mo au plus) au lieu d'un staging de toute la chaine.
+  L'orthophoto n'est plus jamais tenue en RAM.
+
+### P7 - construction des tuiles interieures (TerrainNodeMesh)
+- Loin du bord, les altitudes sont lues une fois dans une grille bordee de
+  deux rangs, puis les MEMES operations flottantes que `sampleGrid`. Bords et
+  temoin `--no-tile-cache` : chemin de reference.
+
+### En plus du plan
+- `--vsync` : presentation FIFO. Le plus gros levier de CONSOMMATION (378
+  images/s sur l'UHD 770 = GPU a 100 % pour un ecran a 60 Hz). Non active
+  par defaut : les mesures du projet comptent des images non plafonnees.
+- Ligne `Ressources (PHASE 30)` completee par le bilan du pool de geometrie.
+- Televersements surs en cas d'echec d'allocation : le `Mesh` possede ses
+  plages des leur reservation, et aucune copie n'est confiee a l'image
+  suivante avant que toutes les ecritures du maillage aient reussi.
+- Le C4244 connu de main.cpp (Phase 27, `groundDetailPattern`) : conversion
+  rendue explicite, meme valeur.
+
+## 6. Bilan chiffre (meme banc, memes scenarios, moyenne de 2 passages)
+
+Release, lavapipe, 1280 x 720, zone proxy. "RAM" inclut ici la memoire GPU
+(lavapipe l'alloue dans le processus) : sur l'UHD 770 elle n'y figure pas.
+
+| | foret avant | foret apres | panorama avant | panorama apres | survol avant | survol apres |
+|---|---:|---:|---:|---:|---:|---:|
+| memoire GPU, fin de partie | 75,0 Mo | **55,5 Mo** | 71,6 Mo | **54,6 Mo** | 254 Mo | **86,7 Mo** |
+| memoire GPU, pic de session | 102,6 Mo | **55,5 Mo** | 96,6 Mo | **54,6 Mo** | 285 Mo | **86,7 Mo** |
+| dont geometrie de terrain (pic) | 27 Mo | **4 Mo** | 24 Mo | **4 Mo** | 188 Mo | **33 Mo** |
+| blocs vkAllocateMemory vivants (pic) | 436 | **10** | 408 | **10** | 1 366 | **18** |
+| appels vkAllocateMemory (session) | 439 | **13** | 411 | **13** | ~16 950 | **22** |
+| pic RAM au chargement | 302 Mo | **233 Mo** | 302 Mo | **234 Mo** | 302 Mo | **234 Mo** |
+| pic memoire GPU au chargement | 89,2 Mo | **50,5 Mo** | 89,2 Mo | **50,5 Mo** | 89,2 Mo | **50,5 Mo** |
+| temps de chargement | 0,48 s | **0,38 s** | 0,47 s | **0,38 s** | 0,47 s | **0,38 s** |
+| pic RAM de session | 463 Mo | **409 Mo** | 353 Mo | **312 Mo** | 605 Mo | **374 Mo** |
+| tuile : geometrie | 167 us | **142 us** | 194 us | **139 us** | 202 us | **105 us** |
+| tuile : televersement | 210 us | **0,5 us** | 207 us | **0,6 us** | 219 us | **0,7 us** |
+| streaming terrain, CPU par image | 119 us | **45 us** | 58 us | **35 us** | 4,3 ms | **0,93 ms** |
+| temps de rendu (drawFrame) | 120 ms | **83 ms** | 51 ms | **43 ms** | 62 ms | **52 ms** |
+| images/s (lavapipe) | 8,2 | **11,8 (+44 %)** | 19,4 | **22,7 (+17 %)** | 14,6 | **18,0 (+24 %)** |
+
+Les images/s et le temps de rendu sont ceux d'un GPU LOGICIEL : ils disent le
+sens et l'ordre de grandeur du gain (moins de fragments de terrain ombres,
+moins d'octets lus par sommet), pas le chiffre de l'UHD 770. Les octets, les
+allocations et les couts CPU de construction, eux, ne dependent pas du GPU.
+
+Maillages d'objets (27 maillages, 4 070 sommets, 1 504 triangles) : 295 Ko ->
+188 Ko (-36 %), en 1 bloc au lieu de 54 allocations (et 54 de staging).
+
+## 7. Verification
+
+- **Tests headless** : 3 963 / 3 963 (3 943 avant : +20 verifications),
+  compiles avec GCC 13 (0 avertissement en -Wall -Wextra) et Clang 18. Les
+  25 verifications qui ont besoin des vraies dalles LiDAR sont ignorees ici,
+  comme toujours sans elles.
+- **Validation Khronos** (Debug) : 0 message sur foret, panorama et survol ;
+  **validation de synchronisation** : 0 message, chemins direct ET staging.
+  Controle negatif : sans la barriere VERTEX_INPUT -> TRANSFER, 414 messages
+  SYNC-HAZARD-WRITE-AFTER-READ en 30 s de survol avec `--force-staging`.
+- **Images** (sans faune : les animaux bougent en temps reel, leur position
+  depend du nombre d'images rendues) :
+  - foret : 353 pixels sur 921 600 (0,038 %) ; 329 a +/- 1 niveau
+    (normales quantifiees) et 24 aux pieds des brins et des troncs, la ou leur
+    profondeur EGALE celle du sol. Preuve : une variante qui rend ces egalites
+    au terrain redonne l'image de reference au bit pres ;
+  - panorama : 1 149 pixels (0,125 %), dont ~250 isoles sur les parois quasi
+    verticales vues en rasant (culling, voir ShaderSet::cullBackFaces) ;
+  - chemin staging (`--force-staging`), maillage parallele
+    (`--tile-threads=4`), orthophoto par tranches, chemin rapide des tuiles :
+    chacun IDENTIQUE au bit pres au chemin qu'il remplace ;
+  - `--no-lod` et LOD : identiques entre eux sur le terrain synthetique.
+
+## 8. Ce qui reste, et pour qui
+
+- **A re-mesurer sur l'UHD 770** : les images/s Release (`profile_phase27.ps1`,
+  `profile_phase29.ps1`) et `run_vulkan_check.ps1` complet. Les lignes
+  `Ressources (PHASE 30)` donnent desormais la memoire GPU exacte dans le
+  journal de chaque scenario.
+- **Staging sur GPU discret** : un staging (une allocation) par
+  televersement, comme avant la phase. Un anneau de staging persistant
+  ramenerait ce chemin au niveau du chemin direct ; non ecrit faute de GPU
+  discret pour l'eprouver.
+- **Vertex pulling du terrain** (16 -> ~4,5 o par sommet) : 25 Mo de mieux au
+  pic du survol. Voir section 4.
+- **Cache de pipelines** (`VkPipelineCache` sur disque) : demarrage plus
+  rapide sur un pilote sans cache propre ; le pilote Intel en a un.
+- **CPU par image** : le profil (perf) ne montre plus que le semis de l'herbe
+  et des arbres (Phase 18) ; rien d'autre au-dessus du bruit.
+
+## 9. Reproduire
+
+    # Linux : dependances (Ubuntu 24.04)
+    apt-get install mesa-vulkan-drivers libvulkan-dev glslc vulkan-validationlayers \
+        ninja-build libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+        libxkbcommon-dev xvfb imagemagick python3-numpy
+    cmake -S . -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release -DGLFW_BUILD_WAYLAND=OFF
+    ninja -C build-rel
+    python3 tools/make_bench_zone.py          # sans les vraies donnees seulement
+    Xvfb :99 -screen 0 1280x720x24 &
+    DISPLAY=:99 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+        build-rel/vercora assets/terrain/vercora_zone_1m.vchm --lock-input \
+        --hour=13 --time-scale=0 --freeze-anim --start=901800,6435800 \
+        --look=0,-8 --quit-after=30
+    # puis lire les lignes "Ressources", "Cout par image", "Construction de tuiles"
+    # validation de synchronisation : Debug + VK_LAYER_ENABLES=
+    #   VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT

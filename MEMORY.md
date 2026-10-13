@@ -2650,3 +2650,42 @@ Tests **3807/3807** (3636 avant), 0 `[Validation]` au demarrage.
 - Relecture : seuls main.cpp et foliage.vert modifies ; Forest/Vegetation/faune/
   artisanat/collision/activites identiques octet pour octet ; chemin w >= 0 du shader inchange.
 - Outil : `build-release\` existe desormais (profil Release hors du `build\` Debug).
+
+## PHASE 30 (2026-10-13) - optimisation des ressources (detail : NOTES-PHASE30.md)
+
+Session cloud (Linux, sans GPU ni donnees LiDAR) : mesure sous **lavapipe +
+Xvfb** (rendu logiciel DETERMINISTE : deux runs identiques = 0 pixel
+d'ecart, donc preuves au bit pres possibles) sur une **zone proxy** a la
+vraie echelle (`tools/make_bench_zone.py` : relief fBm 5001 x 5001, georef
+et altitudes de la vraie zone, couvert tire de l'orthophoto versionnee).
+Les chiffres sont comparables avant/apres, PAS a ceux de l'UHD 770.
+
+- **Build Linux** : GCC 13 / Clang 18 (`= {}` sur struct imbriquee ->
+  surcharges, CWG 1397 ; `GLFW_INCLUDE_NONE`). `cmake -G Ninja
+  -DGLFW_BUILD_WAYLAND=OFF`. Tests 3 963 / 3 963 (+20).
+- **Instrumentation** : toute memoire GPU via `VulkanContext::allocateMemory`
+  (comptee), RAM via `core/ProcessMemory`, ligne `Ressources (PHASE 30)` au
+  chargement / toutes les 10 s / en fin de partie. Options `--quit-after=S`,
+  `--freeze-anim`, `--force-staging`, `--vsync`.
+- **Geometrie** : `Vertex` (68 o) reste le format CPU ; GPU = `ObjectVertex`
+  44 o (exact) et `TerrainVertex` 16 o (x/z/UV/morph recalcules par
+  terrain.vert depuis `gl_VertexIndex` + `DrawItem::grid`, `precise`).
+  Topologie des tuiles partagee en uint16. `GpuBufferPool` (blocs 4 Mo) :
+  ecriture DIRECTE en memoire unifiee, staging + barriere VERTEX_INPUT ->
+  TRANSFER sinon. Tuiles interieures construites sans relecture (bit a bit).
+- **Rendu** : terrain dessine en DERNIER (early-Z) + culling de ses faces
+  arriere. Orthophoto lue par tranches dans un staging de 4 Mo reutilise.
+- **Bilan survol 900 m/s** : pic GPU 285 -> 87 Mo, terrain 188 -> 33 Mo,
+  vkAllocateMemory ~17 000 -> 22, streaming 4,3 -> 0,93 ms/image.
+  Foret : pic GPU 103 -> 56 Mo, +44 % d'images/s (lavapipe). Chargement :
+  pic RAM -68 Mo, pic GPU 89 -> 50 Mo.
+- **Image** : quantification des normales (+/- 1 niveau sur ~0,04 % des
+  pixels), egalites de profondeur aux pieds des brins/troncs (24 px), et
+  ~250 px isoles sur parois rasantes (culling). Staging, parallele, ortho,
+  tuiles rapides : identiques au bit pres a ce qu'ils remplacent.
+- **Validation** : 0 message (standard ET synchronisation, chemins direct et
+  staging). Controle negatif : sans la barriere, 414 SYNC-HAZARD en survol.
+- **PIEGE** pour les comparaisons d'images : la FAUNE bouge en temps reel ;
+  comparer avec `--no-wildlife`, sinon un animal deplace fait 6-11 pixels.
+- **A faire sur la machine de dev** : re-mesurer en Release sur l'UHD 770
+  (profile_phase27/29.ps1, run_vulkan_check.ps1 complet).

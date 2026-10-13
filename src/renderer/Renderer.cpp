@@ -241,23 +241,20 @@ MeshHandle Renderer::addMesh(const MeshData& meshData, bool log) {
     const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(indexCount) *
                                     (shortIndices ? sizeof(uint16_t) : sizeof(uint32_t));
 
-    const GpuRange vertexRange = geometryPool_->allocate(vertexBytes);
-    GpuRange indexRange;
-    try {
-        indexRange = geometryPool_->allocate(indexBytes);
-    } catch (...) {
-        geometryPool_->release(vertexRange);
-        throw;
-    }
+    // Le Mesh possede ses plages DES leur allocation : si la suite echoue
+    // (memoire epuisee), il les rend au pool en se detruisant. Et aucune copie
+    // n'est confiee a l'image suivante avant que les DEUX ecritures aient
+    // reussi - sinon une copie en attente viserait une plage deja rendue.
+    auto mesh = allocateMesh(VertexLayout::Object, vertexBytes, vertexCount, indexBytes,
+                             shortIndices ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32,
+                             indexCount);
+    RangeWrite vertexWrite = beginRangeWrite(mesh->vertexRange());
+    RangeWrite indexWrite = beginRangeWrite(mesh->indexRange());
 
-    RangeWrite vertexWrite = beginRangeWrite(vertexRange);
     auto* vertices = static_cast<ObjectVertex*>(vertexWrite.destination);
     for (uint32_t v = 0; v < vertexCount; ++v) {
         vertices[v] = toObjectVertex(meshData.vertices[v]);
     }
-    finishRangeWrite(vertexWrite);
-
-    RangeWrite indexWrite = beginRangeWrite(indexRange);
     if (shortIndices) {
         auto* indices = static_cast<uint16_t*>(indexWrite.destination);
         for (uint32_t k = 0; k < indexCount; ++k) {
@@ -267,6 +264,7 @@ MeshHandle Renderer::addMesh(const MeshData& meshData, bool log) {
         std::memcpy(indexWrite.destination, meshData.indices.data(),
                     static_cast<std::size_t>(indexBytes));
     }
+    finishRangeWrite(vertexWrite);
     finishRangeWrite(indexWrite);
 
     if (log) {
@@ -275,9 +273,22 @@ MeshHandle Renderer::addMesh(const MeshData& meshData, bool log) {
                 std::to_string(indexCount / 3) + " triangles, " +
                 std::to_string((vertexBytes + indexBytes + 1023) / 1024) + " Ko.");
     }
-    return registerMesh(std::make_unique<Mesh>(
-        *geometryPool_, VertexLayout::Object, vertexRange, vertexCount, indexRange,
-        shortIndices ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32, indexCount, true));
+    return registerMesh(std::move(mesh));
+}
+
+std::unique_ptr<Mesh> Renderer::allocateMesh(VertexLayout layout, VkDeviceSize vertexBytes,
+                                             uint32_t vertexCount, VkDeviceSize indexBytes,
+                                             VkIndexType indexType, uint32_t indexCount) {
+    const GpuRange vertexRange = geometryPool_->allocate(vertexBytes);
+    GpuRange indexRange;
+    try {
+        indexRange = geometryPool_->allocate(indexBytes);
+    } catch (...) {
+        geometryPool_->release(vertexRange);
+        throw;
+    }
+    return std::make_unique<Mesh>(*geometryPool_, layout, vertexRange, vertexCount,
+                                  indexRange, indexType, indexCount, true);
 }
 
 MeshHandle Renderer::addTerrainMesh(const std::vector<TerrainVertex>& vertices,
@@ -296,19 +307,14 @@ MeshHandle Renderer::addTerrainMesh(const std::vector<TerrainVertex>& vertices,
     }
     const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(vertexCount) * sizeof(TerrainVertex);
     const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(indices.size()) * sizeof(uint32_t);
-    const GpuRange vertexRange = geometryPool_->allocate(vertexBytes);
-    GpuRange indexRange;
-    try {
-        indexRange = geometryPool_->allocate(indexBytes);
-    } catch (...) {
-        geometryPool_->release(vertexRange);
-        throw;
-    }
-    RangeWrite vertexWrite = beginRangeWrite(vertexRange);
+    // Meme ordre que addMesh : plages possedees d'abord, copies confiees ensuite.
+    auto mesh = allocateMesh(VertexLayout::Terrain, vertexBytes, vertexCount, indexBytes,
+                             VK_INDEX_TYPE_UINT32, static_cast<uint32_t>(indices.size()));
+    RangeWrite vertexWrite = beginRangeWrite(mesh->vertexRange());
+    RangeWrite indexWrite = beginRangeWrite(mesh->indexRange());
     std::memcpy(vertexWrite.destination, vertices.data(), static_cast<std::size_t>(vertexBytes));
-    finishRangeWrite(vertexWrite);
-    RangeWrite indexWrite = beginRangeWrite(indexRange);
     std::memcpy(indexWrite.destination, indices.data(), static_cast<std::size_t>(indexBytes));
+    finishRangeWrite(vertexWrite);
     finishRangeWrite(indexWrite);
 
     if (log) {
@@ -316,9 +322,7 @@ MeshHandle Renderer::addTerrainMesh(const std::vector<TerrainVertex>& vertices,
                 " sommets, " + std::to_string(indices.size() / 3) + " triangles, " +
                 std::to_string((vertexBytes + indexBytes) / (1024 * 1024)) + " Mo.");
     }
-    return registerMesh(std::make_unique<Mesh>(
-        *geometryPool_, VertexLayout::Terrain, vertexRange, vertexCount, indexRange,
-        VK_INDEX_TYPE_UINT32, static_cast<uint32_t>(indices.size()), true));
+    return registerMesh(std::move(mesh));
 }
 
 uint32_t Renderer::addSharedIndices(const std::vector<uint32_t>& indices) {
@@ -332,7 +336,13 @@ uint32_t Renderer::addSharedIndices(const std::vector<uint32_t>& indices) {
     shared.type = shortIndices ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
     shared.range = geometryPool_->allocate(static_cast<VkDeviceSize>(indices.size()) *
                                            (shortIndices ? sizeof(uint16_t) : sizeof(uint32_t)));
-    RangeWrite write = beginRangeWrite(shared.range);
+    RangeWrite write;
+    try {
+        write = beginRangeWrite(shared.range);
+    } catch (...) {
+        geometryPool_->release(shared.range);
+        throw;
+    }
     if (shortIndices) {
         auto* out = static_cast<uint16_t*>(write.destination);
         for (std::size_t k = 0; k < indices.size(); ++k) {
@@ -352,15 +362,17 @@ Renderer::TerrainMeshWrite Renderer::beginTerrainMesh(uint32_t vertexCount,
         throw std::runtime_error("Tuile de terrain : topologie partagee inconnue.");
     }
     const SharedIndices& shared = sharedIndices_[sharedIndices];
-    const GpuRange range = geometryPool_->allocate(
-        static_cast<VkDeviceSize>(vertexCount) * sizeof(TerrainVertex));
-    RangeWrite write = beginRangeWrite(range);
+    // Le Mesh possede sa plage avant l'ecriture : si le staging ne peut pas
+    // etre cree, il la rend au pool en se detruisant.
+    auto mesh = std::make_unique<Mesh>(
+        *geometryPool_, VertexLayout::Terrain,
+        geometryPool_->allocate(static_cast<VkDeviceSize>(vertexCount) * sizeof(TerrainVertex)),
+        vertexCount, shared.range, shared.type, shared.count, false);
+    RangeWrite write = beginRangeWrite(mesh->vertexRange());
 
     TerrainMeshWrite result;
     result.vertices = static_cast<TerrainVertex*>(write.destination);
-    result.mesh = registerMesh(std::make_unique<Mesh>(
-        *geometryPool_, VertexLayout::Terrain, range, vertexCount, shared.range,
-        shared.type, shared.count, false));
+    result.mesh = registerMesh(std::move(mesh));
     if (write.staging) {
         pendingTerrainWrites_.emplace(result.mesh, std::move(write));
     }
