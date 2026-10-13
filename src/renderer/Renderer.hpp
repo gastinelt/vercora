@@ -163,6 +163,12 @@ public:
     // coloration procedurale est visible.
     void setTerrainTexture(const TextureData& data);
 
+    // PHASE 30. Meme chose, mais les texels sont lus dans `path` DIRECTEMENT
+    // vers le staging de la texture : `header` vient de loadTextureFileHeader
+    // et ne porte aucun texel. Evite de tenir l'orthophoto (42 Mo) en RAM en
+    // plus du staging et de l'image GPU pendant le chargement.
+    void setTerrainTextureFromFile(const TextureData& header, const std::string& path);
+
     // Bascule coloration procedurale <-> orthophoto (voir RenderOptions).
     // Sans effet visible si aucune texture n'a ete chargee.
     void setOrthoMix(float mix);

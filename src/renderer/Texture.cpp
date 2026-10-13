@@ -72,8 +72,19 @@ TextureData Texture::whitePixelData() {
 
 Texture::Texture(VulkanContext& context, VkCommandPool commandPool, VkQueue queue,
                  const TextureData& data, bool repeat)
+    : Texture(context, commandPool, queue, data,
+              [&data](void* destination, uint64_t offset, uint64_t bytes) {
+                  std::memcpy(destination, data.pixels.data() + offset,
+                              static_cast<std::size_t>(bytes));
+              },
+              repeat) {
+}
+
+Texture::Texture(VulkanContext& context, VkCommandPool commandPool, VkQueue queue,
+                 const TextureData& data, const PixelSource& source, bool repeat)
     : context_(context) {
-    if (data.pixels.empty() || data.mips.empty()) {
+    if (data.mips.empty() || data.payloadSize() == 0 ||
+        (!data.pixels.empty() && data.pixels.size() < data.payloadSize())) {
         throw std::runtime_error("Texture : donnees vides.");
     }
 
@@ -95,7 +106,7 @@ Texture::Texture(VulkanContext& context, VkCommandPool commandPool, VkQueue queu
 
     const uint32_t mipLevels = static_cast<uint32_t>(data.mips.size());
     createImage(data.width, data.height, mipLevels, format);
-    uploadAndTransition(commandPool, queue, data);
+    uploadAndTransition(commandPool, queue, data, source);
     createView(format, mipLevels);
     createSampler(mipLevels, repeat);
 }
@@ -144,18 +155,59 @@ void Texture::createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
 }
 
 void Texture::uploadAndTransition(VkCommandPool commandPool, VkQueue queue,
-                                  const TextureData& data) {
+                                  const TextureData& data, const PixelSource& source) {
     VkDevice device = context_.device();
-    const VkDeviceSize total = static_cast<VkDeviceSize>(data.pixels.size());
+    const VkDeviceSize total = static_cast<VkDeviceSize>(data.payloadSize());
+    const uint32_t mipLevels = static_cast<uint32_t>(data.mips.size());
 
-    // Un seul buffer de staging pour toute la chaine : les niveaux sont deja
-    // contigus dans le fichier, donc les offsets de copie sont ceux du .vcto.
-    VulkanBuffer staging(context_, total,
+    // PHASE 30 : un staging de 4 Mo au plus, REUTILISE tranche apres tranche,
+    // au lieu d'un staging de la taille de toute la chaine. Pour l'orthophoto
+    // de la zone, c'etait 42 Mo de memoire GPU transitoire en plus de l'image
+    // elle-meme : le pic de memoire GPU de TOUTE la partie se situait la, au
+    // chargement. Les texels sont ecrits dans le staging par `source` -
+    // directement depuis le fichier pour l'orthophoto.
+    constexpr VkDeviceSize kStagingChunk = 4ull * 1024 * 1024;
+    const VkDeviceSize stagingSize = std::min(total, kStagingChunk);
+    VulkanBuffer staging(context_, stagingSize,
                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    staging.writeToBuffer(data.pixels.data(), total);
-    staging.unmap();
+    staging.map();
+    auto* stagingBytes = static_cast<unsigned char*>(staging.mapped());
+
+    // --- Decoupe en BANDES de rangees de blocs ------------------------------
+    // Une bande = des rangees completes d'un niveau, assez peu pour tenir dans
+    // le staging. BC1 se range par rangees de blocs de 4 texels de haut ; une
+    // bande qui n'atteint pas le bas d'un niveau a donc une hauteur multiple de
+    // 4, comme l'exige une copie vers un format compresse.
+    struct Band {
+        uint32_t level = 0;
+        uint32_t y = 0;
+        uint32_t height = 0;
+        uint64_t payloadOffset = 0;
+        uint64_t bytes = 0;
+    };
+    std::vector<Band> bands;
+    const bool blocks = (data.format == TextureFormat::BC1);
+    const uint32_t texelsPerRow = blocks ? 4u : 1u;
+    for (uint32_t level = 0; level < mipLevels; ++level) {
+        const TextureMipLevel& mip = data.mips[level];
+        const uint64_t rowBytes = blocks ? static_cast<uint64_t>((mip.width + 3u) / 4u) * 8u
+                                         : static_cast<uint64_t>(mip.width) * 4u;
+        const uint32_t rows = (mip.height + texelsPerRow - 1u) / texelsPerRow;
+        const uint32_t rowsPerBand = static_cast<uint32_t>(
+            std::max<uint64_t>(1u, stagingSize / rowBytes));
+        for (uint32_t row = 0; row < rows; row += rowsPerBand) {
+            const uint32_t count = std::min(rowsPerBand, rows - row);
+            Band band;
+            band.level = level;
+            band.y = row * texelsPerRow;
+            band.height = std::min(count * texelsPerRow, mip.height - band.y);
+            band.payloadOffset = mip.offset + static_cast<uint64_t>(row) * rowBytes;
+            band.bytes = static_cast<uint64_t>(count) * rowBytes;
+            bands.push_back(band);
+        }
+    }
 
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -166,59 +218,73 @@ void Texture::uploadAndTransition(VkCommandPool commandPool, VkQueue queue,
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-    const uint32_t mipLevels = static_cast<uint32_t>(data.mips.size());
-
-    transitionLayout(commandBuffer, image_, mipLevels,
-                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
+    // --- Un lot de bandes par remplissage du staging ------------------------
     std::vector<VkBufferImageCopy> regions;
-    regions.reserve(mipLevels);
-    for (uint32_t level = 0; level < mipLevels; ++level) {
-        const TextureMipLevel& mip = data.mips[level];
-        VkBufferImageCopy region{};
-        region.bufferOffset = mip.offset;
-        // 0 = "serre sur l'extent de l'image". Indispensable pour un format
-        // compresse, ou bufferRowLength se compterait en TEXELS et non en blocs :
-        // le calculer a la main serait une occasion d'erreur gratuite.
-        region.bufferRowLength = 0;
-        region.bufferImageHeight = 0;
-        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.imageSubresource.mipLevel = level;
-        region.imageSubresource.baseArrayLayer = 0;
-        region.imageSubresource.layerCount = 1;
-        region.imageOffset = { 0, 0, 0 };
-        region.imageExtent = { mip.width, mip.height, 1 };
-        regions.push_back(region);
+    std::size_t next = 0;
+    bool first = true;
+    while (next < bands.size()) {
+        regions.clear();
+        VkDeviceSize used = 0;
+        while (next < bands.size() && used + bands[next].bytes <= stagingSize) {
+            const Band& band = bands[next];
+            source(stagingBytes + used, band.payloadOffset, band.bytes);
+
+            VkBufferImageCopy region{};
+            region.bufferOffset = used;
+            // 0 = "serre sur l'extent de la copie". Indispensable pour un format
+            // compresse, ou bufferRowLength se compterait en TEXELS et non en
+            // blocs : le calculer a la main serait une occasion d'erreur
+            // gratuite.
+            region.bufferRowLength = 0;
+            region.bufferImageHeight = 0;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = band.level;
+            region.imageSubresource.baseArrayLayer = 0;
+            region.imageSubresource.layerCount = 1;
+            region.imageOffset = { 0, static_cast<int32_t>(band.y), 0 };
+            region.imageExtent = { data.mips[band.level].width, band.height, 1 };
+            regions.push_back(region);
+
+            used += band.bytes;
+            ++next;
+        }
+        const bool last = (next == bands.size());
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        if (first) {
+            transitionLayout(commandBuffer, image_, mipLevels,
+                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        }
+        vkCmdCopyBufferToImage(commandBuffer, staging.handle(), image_,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               static_cast<uint32_t>(regions.size()), regions.data());
+        if (last) {
+            transitionLayout(commandBuffer, image_, mipLevels,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        }
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        // Transfert a l'initialisation : attendre est simple et sans
+        // consequence sur la boucle de rendu, qui n'a pas encore demarre - et
+        // c'est ce qui rend le staging reutilisable pour la tranche suivante.
+        vkQueueWaitIdle(queue);
+        first = false;
     }
-
-    vkCmdCopyBufferToImage(commandBuffer, staging.handle(), image_,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           static_cast<uint32_t>(regions.size()), regions.data());
-
-    transitionLayout(commandBuffer, image_, mipLevels,
-                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                     VK_PIPELINE_STAGE_TRANSFER_BIT,
-                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    // Transfert unique a l'initialisation : attendre est simple et sans
-    // consequence sur la boucle de rendu, qui n'a pas encore demarre.
-    vkQueueWaitIdle(queue);
 
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }
