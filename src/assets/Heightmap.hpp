@@ -161,6 +161,12 @@ public:
     // [0, resolution-1] : appeler avec ix = -1 renvoie la colonne 0.
     float at(int64_t ix, int64_t iz) const;
 
+    // PHASE 30. La grille brute, [iz * resolution + ix], en lecture seule. Pour
+    // les boucles chaudes qui ont DEJA etabli que leurs indices sont dans la
+    // grille et n'ont donc que faire de l'ecretage de at() - la construction
+    // des tuiles interieures du quadtree (renderer/TerrainNodeMesh.cpp).
+    const float* rawHeights() const { return heights_.data(); }
+
     // Position monde d'un echantillon (le long de X pour ix, de Z pour iz).
     float worldCoord(uint32_t index) const;
 
