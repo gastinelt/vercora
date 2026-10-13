@@ -1,5 +1,7 @@
 #pragma once
 
+#include "renderer/VulkanContext.hpp" // GpuAllocation
+
 #include <vulkan/vulkan.h>
 
 #include <memory>
@@ -76,7 +78,7 @@ private:
     VulkanContext& context_;
     VkDeviceSize   size_ = 0;
     VkBuffer       buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory memory_ = VK_NULL_HANDLE;
+    GpuAllocation  allocation_;
     void*          mapped_ = nullptr;
 };
 

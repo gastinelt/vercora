@@ -3,6 +3,8 @@
 #include "core/Logger.hpp"
 #include "core/Window.hpp"
 
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <set>
 #include <stdexcept>
@@ -233,6 +235,28 @@ void VulkanContext::pickPhysicalDevice() {
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(physicalDevice_, &props);
     logInfo(std::string("GPU selectionne : ") + props.deviceName);
+
+    // PHASE 30 : proprietes memoire lues UNE fois (voir findMemoryType), et
+    // detection de la memoire unifiee.
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memoryProperties_);
+    const VkMemoryPropertyFlags unified = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    std::string heaps = "Memoire GPU : " + std::to_string(memoryProperties_.memoryHeapCount) +
+                        " tas -";
+    for (uint32_t i = 0; i < memoryProperties_.memoryHeapCount; ++i) {
+        const VkMemoryHeap& heap = memoryProperties_.memoryHeaps[i];
+        heaps += " [" + std::to_string(i) + "] " +
+                 std::to_string(heap.size / (1024 * 1024)) + " Mo" +
+                 ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) ? " device-local" : "");
+    }
+    for (uint32_t i = 0; i < memoryProperties_.memoryTypeCount; ++i) {
+        if ((memoryProperties_.memoryTypes[i].propertyFlags & unified) == unified) {
+            unifiedMemory_ = true;
+        }
+    }
+    logInfo(heaps + (unifiedMemory_ ? " ; memoire UNIFIEE (device-local et host-visible)."
+                                    : " ; memoire device-local NON mappable."));
 }
 
 bool VulkanContext::isDeviceSuitable(VkPhysicalDevice device) const {
@@ -397,18 +421,79 @@ SwapChainSupportDetails VulkanContext::querySwapChainSupport() const {
 }
 
 uint32_t VulkanContext::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
-    VkPhysicalDeviceMemoryProperties memProperties{};
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memProperties);
-
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
+    for (uint32_t i = 0; i < memoryProperties_.memoryTypeCount; ++i) {
         const bool typeOk = (typeFilter & (1u << i)) != 0;
         const bool propsOk =
-            (memProperties.memoryTypes[i].propertyFlags & properties) == properties;
+            (memoryProperties_.memoryTypes[i].propertyFlags & properties) == properties;
         if (typeOk && propsOk) {
             return i;
         }
     }
     throw std::runtime_error("Aucun type de memoire adapte trouve.");
+}
+
+GpuAllocation VulkanContext::allocateMemory(const VkMemoryRequirements& requirements,
+                                            VkMemoryPropertyFlags properties, bool map) {
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = requirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(requirements.memoryTypeBits, properties);
+
+    GpuAllocation allocation;
+    if (vkAllocateMemory(device_, &allocInfo, nullptr, &allocation.memory) != VK_SUCCESS) {
+        throw std::runtime_error("Echec de l'allocation de " +
+                                 std::to_string(requirements.size) +
+                                 " octets de memoire GPU.");
+    }
+    allocation.size = requirements.size;
+    allocation.deviceLocal = (properties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0;
+    if (map && vkMapMemory(device_, allocation.memory, 0, VK_WHOLE_SIZE, 0,
+                           &allocation.mapped) != VK_SUCCESS) {
+        vkFreeMemory(device_, allocation.memory, nullptr);
+        throw std::runtime_error("Echec du mappage d'un bloc de memoire GPU.");
+    }
+
+    gpuMemory_.liveBytes += allocation.size;
+    gpuMemory_.peakBytes = std::max(gpuMemory_.peakBytes, gpuMemory_.liveBytes);
+    if (allocation.deviceLocal) {
+        gpuMemory_.liveDeviceLocalBytes += allocation.size;
+        gpuMemory_.peakDeviceLocalBytes =
+            std::max(gpuMemory_.peakDeviceLocalBytes, gpuMemory_.liveDeviceLocalBytes);
+    }
+    ++gpuMemory_.liveAllocations;
+    gpuMemory_.peakAllocations = std::max(gpuMemory_.peakAllocations, gpuMemory_.liveAllocations);
+    ++gpuMemory_.allocateCalls;
+    return allocation;
+}
+
+void VulkanContext::freeMemory(GpuAllocation& allocation) {
+    if (allocation.memory == VK_NULL_HANDLE) {
+        return;
+    }
+    if (allocation.mapped != nullptr) {
+        vkUnmapMemory(device_, allocation.memory);
+    }
+    vkFreeMemory(device_, allocation.memory, nullptr);
+    gpuMemory_.liveBytes -= allocation.size;
+    if (allocation.deviceLocal) {
+        gpuMemory_.liveDeviceLocalBytes -= allocation.size;
+    }
+    --gpuMemory_.liveAllocations;
+    allocation = GpuAllocation{};
+}
+
+std::string VulkanContext::gpuMemoryLine() const {
+    const auto mo = [](uint64_t bytes) {
+        char text[32];
+        std::snprintf(text, sizeof(text), "%.1f Mo", static_cast<double>(bytes) / (1024.0 * 1024.0));
+        return std::string(text);
+    };
+    return "GPU " + mo(gpuMemory_.liveBytes) + " (pic " + mo(gpuMemory_.peakBytes) +
+           "), dont device-local " + mo(gpuMemory_.liveDeviceLocalBytes) + " (pic " +
+           mo(gpuMemory_.peakDeviceLocalBytes) + ") ; " +
+           std::to_string(gpuMemory_.liveAllocations) + " blocs vivants (pic " +
+           std::to_string(gpuMemory_.peakAllocations) + "), " +
+           std::to_string(gpuMemory_.allocateCalls) + " vkAllocateMemory au total";
 }
 
 VkFormat VulkanContext::findSupportedFormat(const std::vector<VkFormat>& candidates,

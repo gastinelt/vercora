@@ -111,9 +111,7 @@ Texture::~Texture() {
     if (image_ != VK_NULL_HANDLE) {
         vkDestroyImage(device, image_, nullptr);
     }
-    if (memory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(device, memory_, nullptr);
-    }
+    context_.freeMemory(allocation_);
 }
 
 void Texture::createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
@@ -139,16 +137,9 @@ void Texture::createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
     VkMemoryRequirements requirements{};
     vkGetImageMemoryRequirements(device, image_, &requirements);
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = requirements.size;
-    allocInfo.memoryTypeIndex = context_.findMemoryType(
-        requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &memory_) != VK_SUCCESS) {
-        throw std::runtime_error("Texture : echec de l'allocation memoire de l'image.");
-    }
-    vkBindImageMemory(device, image_, memory_, 0);
+    // PHASE 30 : par le contexte, qui tient le compte de la memoire GPU.
+    allocation_ = context_.allocateMemory(requirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkBindImageMemory(device, image_, allocation_.memory, 0);
     deviceSize_ = requirements.size;
 }
 

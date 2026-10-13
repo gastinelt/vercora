@@ -1,5 +1,7 @@
 #pragma once
 
+#include "renderer/VulkanContext.hpp" // GpuAllocation
+
 #include <vulkan/vulkan.h>
 
 #include <vector>
@@ -68,7 +70,7 @@ private:
     // par le render pass). Recree en meme temps que la swapchain au resize.
     VkFormat       depthFormat_ = VK_FORMAT_UNDEFINED;
     VkImage        depthImage_ = VK_NULL_HANDLE;
-    VkDeviceMemory depthImageMemory_ = VK_NULL_HANDLE;
+    GpuAllocation  depthAllocation_;
     VkImageView    depthImageView_ = VK_NULL_HANDLE;
 
     VkRenderPass renderPass_ = VK_NULL_HANDLE;

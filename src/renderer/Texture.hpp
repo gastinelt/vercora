@@ -4,6 +4,7 @@
 // le renvoie par valeur. L'en-tete reste sans cout : assets/TextureFile.hpp ne
 // depend pas de Vulkan.
 #include "assets/TextureFile.hpp"
+#include "renderer/VulkanContext.hpp" // GpuAllocation
 
 #include <vulkan/vulkan.h>
 
@@ -74,7 +75,7 @@ private:
 
     VulkanContext& context_;
     VkImage        image_ = VK_NULL_HANDLE;
-    VkDeviceMemory memory_ = VK_NULL_HANDLE;
+    GpuAllocation  allocation_;
     VkImageView    view_ = VK_NULL_HANDLE;
     VkSampler      sampler_ = VK_NULL_HANDLE;
     VkDeviceSize   deviceSize_ = 0;

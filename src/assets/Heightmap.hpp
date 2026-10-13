@@ -95,7 +95,14 @@ public:
     // Genere immediatement la grille par bruit fractal. Lance
     // std::runtime_error si les parametres ne peuvent pas produire une surface
     // (resolution < 2, taille <= 0, ...).
-    explicit Heightmap(const Params& params = {});
+    explicit Heightmap(const Params& params);
+
+    // Memes parametres par defaut. Une SURCHARGE plutot qu'un argument par
+    // defaut `= {}` : GCC et Clang refusent de construire une struct IMBRIQUEE
+    // dotee d'initialiseurs de membres dans un argument par defaut de la classe
+    // englobante (CWG 1397), la ou MSVC l'accepte. Le corps d'une fonction
+    // membre, lui, voit la classe complete : la delegation compile partout.
+    explicit Heightmap() : Heightmap(Params{}) {}
 
     // Adopte une grille DEJA CONSTRUITE, sans rien generer : c'est par ici
     // qu'entrent les donnees LiDAR (voir assets/TerrainFile.hpp).

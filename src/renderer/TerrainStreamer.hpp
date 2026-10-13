@@ -176,7 +176,11 @@ public:
     // Ni la Heightmap ni le Renderer ne sont possedes ; les deux doivent vivre
     // plus longtemps que le streamer.
     TerrainStreamer(const Heightmap& heightmap, Renderer& renderer,
-                    const Params& params = {});
+                    const Params& params);
+    // Parametres par defaut : surcharge et non `= {}`, voir Heightmap() (refus
+    // de GCC/Clang, CWG 1397).
+    TerrainStreamer(const Heightmap& heightmap, Renderer& renderer)
+        : TerrainStreamer(heightmap, renderer, Params{}) {}
     ~TerrainStreamer();
 
     TerrainStreamer(const TerrainStreamer&) = delete;
