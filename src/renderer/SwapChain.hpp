@@ -17,7 +17,9 @@ class Window;
 // pas), ce qui evite d'invalider le pipeline graphique.
 class SwapChain {
 public:
-    SwapChain(VulkanContext& context, Window& window);
+    // `vsync` (PHASE 30) : presentation calee sur l'ecran (FIFO) au lieu du
+    // mode non plafonne des mesures. Voir choosePresentMode.
+    SwapChain(VulkanContext& context, Window& window, bool vsync = false);
     ~SwapChain();
 
     SwapChain(const SwapChain&) = delete;
@@ -61,6 +63,7 @@ private:
 
     // MAX_ENUM = "pas encore choisi", pour que le premier choix soit toujours logge.
     VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_MAX_ENUM_KHR;
+    bool vsync_ = false;
 
     std::vector<VkImage>       images_;
     std::vector<VkImageView>   imageViews_;

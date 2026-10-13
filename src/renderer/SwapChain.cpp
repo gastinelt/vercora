@@ -26,8 +26,8 @@ const char* presentModeName(VkPresentModeKHR mode) {
 
 } // namespace
 
-SwapChain::SwapChain(VulkanContext& context, Window& window)
-    : context_(context), window_(window) {
+SwapChain::SwapChain(VulkanContext& context, Window& window, bool vsync)
+    : context_(context), window_(window), vsync_(vsync) {
     // Le format de profondeur est fixe une fois pour toutes (il ne depend pas de
     // la taille) : le render pass, cree une seule fois, s'y refere.
     depthFormat_ = context_.findDepthFormat();
@@ -110,6 +110,16 @@ VkPresentModeKHR SwapChain::choosePresentMode(
     //   FIFO      : seul mode dont Vulkan garantit la presence. Fallback ultime.
     // A rebasculer sur MAILBOX/FIFO quand le jeu sera jouable : le tearing n'est
     // acceptable que pour du profilage.
+    //
+    // PHASE 30 : c'est l'option --vsync. FIFO, le seul mode que Vulkan
+    // garantit : le CPU et le GPU attendent l'ecran au lieu de produire des
+    // images que personne ne verra. C'est le plus gros levier de CONSOMMATION
+    // du jeu (378 images/s mesurees sur l'UHD 770 = GPU a 100 % en permanence,
+    // pour un ecran a 60 Hz). Non active par defaut : toutes les mesures du
+    // projet comptent des images/s non plafonnees.
+    if (vsync_) {
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
     for (VkPresentModeKHR wanted : { VK_PRESENT_MODE_IMMEDIATE_KHR,
                                      VK_PRESENT_MODE_MAILBOX_KHR }) {
         if (std::find(modes.begin(), modes.end(), wanted) != modes.end()) {

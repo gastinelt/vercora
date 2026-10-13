@@ -59,6 +59,11 @@ struct RenderOptions {
     // lit. Sert a eprouver sur la machine de developpement le chemin d'un GPU
     // discret (option --force-staging).
     bool forceStaging = false;
+
+    // PHASE 30. Presentation calee sur l'ecran (FIFO, option --vsync) : la
+    // cadence ne depasse plus le rafraichissement, et le CPU comme le GPU
+    // dorment le reste du temps. Voir SwapChain::choosePresentMode.
+    bool vsync = false;
 };
 
 // Orchestre le rendu : geometries enregistrees, UBO/descriptors, command

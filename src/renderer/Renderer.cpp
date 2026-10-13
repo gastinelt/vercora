@@ -65,7 +65,7 @@ const ShaderSet& shadersFor(Material material) {
 Renderer::Renderer(VulkanContext& context, Window& window,
                    const RenderOptions& options)
     : context_(context), window_(window), options_(options) {
-    swapChain_ = std::make_unique<SwapChain>(context_, window_);
+    swapChain_ = std::make_unique<SwapChain>(context_, window_, options_.vsync);
 
     // PHASE 30 : le pool de geometrie. En memoire unifiee (GPU integre,
     // lavapipe), ses blocs sont mappes et la geometrie y est ecrite DIRECTEMENT

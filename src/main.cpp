@@ -147,6 +147,10 @@ namespace {
 //   vercora.exe [scene] --force-staging      -> geometrie televersee par staging
 //                                               meme en memoire unifiee (chemin
 //                                               d'un GPU discret, a eprouver)
+//   vercora.exe [scene] --vsync              -> presentation calee sur l'ecran
+//                                               (FIFO) : la cadence ne depasse
+//                                               plus le rafraichissement, CPU et
+//                                               GPU dorment le reste du temps
 //
 // Le terrain synthetique n'est PAS supprime, et pour deux raisons distinctes :
 // il reste la scene de reference des tests (monde deterministe, arbres a
@@ -901,6 +905,10 @@ int main(int argc, char** argv) {
         // PHASE 30 : --force-staging televerse la geometrie par staging meme en
         // memoire unifiee (le chemin d'un GPU discret), pour l'eprouver ici.
         bool forceStaging = false;
+        // PHASE 30 : --vsync, presentation FIFO calee sur l'ecran. Le reglage a
+        // prendre pour JOUER (consommation, chauffe, pas de dechirure) ; les
+        // mesures gardent le defaut non plafonne.
+        bool vsync = false;
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--dump-world") {
@@ -1073,6 +1081,8 @@ int main(int argc, char** argv) {
                 freezeAnimation = true;
             } else if (argument == "--force-staging") {
                 forceStaging = true;
+            } else if (argument == "--vsync") {
+                vsync = true;
             } else if (argument.rfind("--", 0) == 0) {
                 logWarn("Option inconnue, ignoree : " + argument);
             } else if (sceneArgument.empty()) {
@@ -1211,6 +1221,7 @@ int main(int argc, char** argv) {
         TerrainGpuMesh sceneTerrain;
         RenderOptions renderOptions;
         renderOptions.forceStaging = forceStaging;
+        renderOptions.vsync = vsync;
 
         Inventory inventory;
 
