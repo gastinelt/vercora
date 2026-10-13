@@ -1,7 +1,7 @@
 #pragma once
 
+#include "renderer/GpuVertex.hpp"
 #include "renderer/InstanceData.hpp"
-#include "renderer/Vertex.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -24,60 +24,82 @@ namespace vercora {
 // Consequence concrete : la logique de jeu se compile et se teste sans GPU (voir
 // tests/logic_tests.cpp), y compris sur une machine ou le SDK n'est pas installe.
 
-// Un seul binding, sommets entrelaces.
-inline VkVertexInputBindingDescription vertexBindingDescription() {
+// PHASE 30 : DEUX formats de sommet, un par famille de shaders (voir
+// renderer/GpuVertex.hpp) - le format de travail CPU `Vertex` n'est plus
+// televerse tel quel. Un seul binding entrelace dans les deux cas.
+
+// --- Objets et vegetation : ObjectVertex, 44 octets -------------------------
+inline VkVertexInputBindingDescription objectBindingDescription() {
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
-    binding.stride = sizeof(Vertex);
+    binding.stride = sizeof(ObjectVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     return binding;
 }
 
-// Mapping des attributs vers les location(...) du vertex shader.
-//
-// Six attributs depuis la Phase 10 : les deux derniers portent la cible de
-// geomorphing du terrain (voir Vertex.hpp) et ne sont decrits qu'aux pipelines
-// dont le vertex shader les lit reellement.
-// `includeMorph` a false pour un vertex shader qui ne lit pas les locations 4/5
-// (cube.vert) : les decrire quand meme declencherait un avertissement de
-// validation. Voir ShaderSet::usesMorphAttributes.
-inline std::array<VkVertexInputAttributeDescription, 6> vertexAttributeDescriptions() {
-    std::array<VkVertexInputAttributeDescription, 6> attrs{};
+// Locations 0 a 3 : position, couleur, normale, UV - les memes que depuis la
+// Phase 3, seul le stride a change (les 24 octets de morphing, qu'aucun de ces
+// shaders ne lisait, ne sont plus dans le buffer).
+inline std::array<VkVertexInputAttributeDescription, 4> objectAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 4> attrs{};
 
     attrs[0].binding = 0;
     attrs[0].location = 0;
     attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[0].offset = offsetof(Vertex, pos);
+    attrs[0].offset = offsetof(ObjectVertex, pos);
 
     attrs[1].binding = 0;
     attrs[1].location = 1;
     attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[1].offset = offsetof(Vertex, color);
+    attrs[1].offset = offsetof(ObjectVertex, color);
 
     attrs[2].binding = 0;
     attrs[2].location = 2;
     attrs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[2].offset = offsetof(Vertex, normal);
+    attrs[2].offset = offsetof(ObjectVertex, normal);
 
     // Deux composantes seulement -> format R32G32.
     attrs[3].binding = 0;
     attrs[3].location = 3;
     attrs[3].format = VK_FORMAT_R32G32_SFLOAT;
-    attrs[3].offset = offsetof(Vertex, uv);
+    attrs[3].offset = offsetof(ObjectVertex, uv);
 
-    // Position et normale du meme sommet dans la grille du niveau de detail
-    // SUPERIEUR (plus grossier). Nulles sur toute geometrie qui n'est pas une
-    // tuile de quadtree : sans effet, le shader ne morphe que si la bande de
-    // morphing poussee par le DrawItem est non vide.
-    attrs[4].binding = 0;
-    attrs[4].location = 4;
-    attrs[4].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[4].offset = offsetof(Vertex, morphPos);
+    return attrs;
+}
 
-    attrs[5].binding = 0;
-    attrs[5].location = 5;
-    attrs[5].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[5].offset = offsetof(Vertex, morphNormal);
+// --- Terrain : TerrainVertex, 16 octets --------------------------------------
+inline VkVertexInputBindingDescription terrainBindingDescription() {
+    VkVertexInputBindingDescription binding{};
+    binding.binding = 0;
+    binding.stride = sizeof(TerrainVertex);
+    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    return binding;
+}
+
+// Deux altitudes en flottant, deux normales en snorm16 (x et z, y reconstruit
+// par terrain.vert). Tout le reste se deduit de gl_VertexIndex.
+inline std::array<VkVertexInputAttributeDescription, 4> terrainAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 4> attrs{};
+
+    attrs[0].binding = 0;
+    attrs[0].location = 0;
+    attrs[0].format = VK_FORMAT_R32_SFLOAT;
+    attrs[0].offset = offsetof(TerrainVertex, height);
+
+    attrs[1].binding = 0;
+    attrs[1].location = 1;
+    attrs[1].format = VK_FORMAT_R32_SFLOAT;
+    attrs[1].offset = offsetof(TerrainVertex, morphHeight);
+
+    attrs[2].binding = 0;
+    attrs[2].location = 2;
+    attrs[2].format = VK_FORMAT_R16G16_SNORM;
+    attrs[2].offset = offsetof(TerrainVertex, normal);
+
+    attrs[3].binding = 0;
+    attrs[3].location = 3;
+    attrs[3].format = VK_FORMAT_R16G16_SNORM;
+    attrs[3].offset = offsetof(TerrainVertex, morphNormal);
 
     return attrs;
 }
@@ -98,7 +120,7 @@ inline VkVertexInputBindingDescription instanceBindingDescription() {
     return binding;
 }
 
-// Locations 6 a 8 : les locations 0 a 5 appartiennent au sommet (voir plus haut),
+// Locations 6 a 8 : les locations basses appartiennent au sommet (voir plus haut),
 // et un pipeline instancie decrit les deux flux dans le meme espace de numeros.
 // Les trois flottants scalaires (scale, yaw, variation, fade) sont regroupes en
 // deux attributs plutot qu'en quatre : moins d'attributs a decrire, et le shader

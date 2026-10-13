@@ -14,22 +14,20 @@ struct ShaderSet {
     std::string vertexSpv;
     std::string fragmentSpv;
 
-    // true si le vertex shader consomme les attributs de geomorphing
-    // (locations 4 et 5, voir Vertex.hpp). Seul terrain.vert le fait.
+    // true si le vertex shader lit le format de sommet du TERRAIN
+    // (TerrainVertex, 16 octets) ; false pour le format des objets et de la
+    // vegetation (ObjectVertex, 44 octets). Voir renderer/GpuVertex.hpp.
     //
-    // Ce drapeau n'est pas une optimisation mais une CORRECTION : declarer dans
-    // le vertex input un attribut qu'aucun shader ne lit fait emettre aux
-    // couches de validation "Vertex attribute at location 4 not consumed by
-    // vertex shader", et le contrat du projet est zero message de validation. Le
-    // format de sommet reste unique cote C++ ; c'est seulement sa DESCRIPTION au
-    // pipeline qui est tronquee pour les materiaux qui n'en lisent qu'une partie
-    // (ce que Vulkan autorise : un binding peut avoir un stride plus grand que
-    // la somme des attributs decrits).
-    bool usesMorphAttributes = false;
+    // PHASE 30 : jusqu'ici ce drapeau (usesMorphAttributes) ne faisait que
+    // TRONQUER la description d'un format unique de 68 octets, pour ne pas
+    // declarer aux shaders d'objets les attributs de morphing qu'ils ne lisent
+    // pas (zero message de validation). Les deux familles ont desormais chacune
+    // leur format, et les octets inutiles ont quitte les buffers eux-memes.
+    bool terrainVertexLayout = false;
 
     // PHASE 11. true si le pipeline doit decrire le second binding de sommets,
-    // cadence par instance (voir VertexFormat.hpp). Meme raisonnement que
-    // usesMorphAttributes : c'est une CORRECTION, pas une optimisation. Decrire
+    // cadence par instance (voir VertexFormat.hpp). C'est une CORRECTION, pas
+    // une optimisation (zero message de validation). Decrire
     // un binding d'instances a un pipeline non instancie obligerait a lier un
     // buffer d'instances avant de dessiner un cube, et ne pas le decrire a un
     // pipeline instancie ferait echouer la validation sur les locations 6 a 8.
@@ -39,6 +37,23 @@ struct ShaderSet {
     // fabrique un triangle couvrant a partir de gl_VertexIndex), pas de test
     // ni d'ecriture de profondeur, melange par alpha.
     bool fullscreenOverlay = false;
+
+    // PHASE 30 : elimine les faces ARRIERE avant le tramage. Reserve au
+    // terrain, et c'est une propriete de la geometrie, pas un reglage : un
+    // champ de hauteurs a toutes ses normales geometriques vers le haut, et un
+    // rayon parti d'un oeil situe AU-DESSUS du relief rencontre toujours une
+    // face avant en premier - une face arriere n'est donc jamais le pixel
+    // visible, elle ne fait que couter du tramage et des tests de profondeur.
+    // (Image identique au bit pres, verifiee - NOTES-PHASE30.md.) Les objets
+    // et la vegetation ne s'y pretent pas : l'herbe est un quad vu des deux
+    // cotes, et rien ne garantit l'enroulement des maillages .obj.
+    //
+    // MESURE (lavapipe, NOTES-PHASE30.md) : -10 % de temps de rendu sur le
+    // panorama. L'image n'est PAS identique au bit pres : 315 pixels isoles
+    // (0,03 %) changent, tous sur des parois quasi verticales vues en rasant,
+    // la ou une face arriere l'emportait d'un cheveu sur la face avant par
+    // erreur d'arrondi de profondeur. C'est desormais toujours la face avant.
+    bool cullBackFaces = false;
 };
 
 // Shaders de la Phase 2 : couleur par sommet + Blinn-Phong. Utilises par le
@@ -46,7 +61,8 @@ struct ShaderSet {
 inline const ShaderSet kObjectShaders{ "cube.vert.spv", "cube.frag.spv" };
 
 // Shaders de la Phase 4 : coloration par altitude et par pente + Blinn-Phong.
-inline const ShaderSet kTerrainShaders{ "terrain.vert.spv", "terrain.frag.spv", true };
+inline const ShaderSet kTerrainShaders{ "terrain.vert.spv", "terrain.frag.spv", true,
+                                        false, false, true };
 
 // Shaders de la Phase 11 : vegetation instanciee (arbres de decor et herbe).
 // Ne lit PAS les attributs de geomorphing, mais lit le binding d'instances.

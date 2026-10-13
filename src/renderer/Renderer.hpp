@@ -1,6 +1,8 @@
 #pragma once
 
 #include "renderer/DrawItem.hpp"
+#include "renderer/GpuBufferPool.hpp"
+#include "renderer/GpuVertex.hpp"
 #include "renderer/Pipeline.hpp" // pour ShaderSet
 #include "renderer/VulkanBuffer.hpp" // pour BufferUploader
 
@@ -11,6 +13,8 @@
 #include <array>
 #include <cmath>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace vercora {
@@ -49,6 +53,12 @@ struct RenderOptions {
     // deux se recouvrent bien. Sans texture chargee, la valeur est ignoree (le
     // binding pointe alors sur un texel blanc).
     float orthoMix = 0.0f;
+
+    // PHASE 30. Force le televersement de la geometrie par STAGING meme en
+    // memoire unifiee, ou elle est sinon ecrite directement la ou le GPU la
+    // lit. Sert a eprouver sur la machine de developpement le chemin d'un GPU
+    // discret (option --force-staging).
+    bool forceStaging = false;
 };
 
 // Orchestre le rendu : geometries enregistrees, UBO/descriptors, command
@@ -84,6 +94,48 @@ public:
     // quadtree, plusieurs par seconde) : une ligne de journal par tuile noierait
     // toute autre information.
     MeshHandle addMesh(const MeshData& meshData, bool log = true);
+
+    // PHASE 30 : GEOMETRIE DE TERRAIN, au format compact TerrainVertex (16
+    // octets, voir renderer/GpuVertex.hpp). Un tel maillage ne se dessine
+    // qu'avec Material::Terrain et un DrawItem::grid qui dit ou il se trouve
+    // dans la heightmap.
+    //
+    // Terrain d'un seul bloc (--no-lod) : sommets et topologie propres.
+    MeshHandle addTerrainMesh(const std::vector<TerrainVertex>& vertices,
+                              const std::vector<uint32_t>& indices,
+                              const std::string& name, bool log = true);
+
+    // Topologie PARTAGEE par plusieurs maillages de terrain : les tuiles du
+    // quadtree ont toutes la meme (Phase 18), et la televerser une fois au lieu
+    // d'une par tuile economise 96 Ko par tuile residente. Stockee en uint16
+    // quand les indices le permettent (65 x 65 sommets par tuile). Vit aussi
+    // longtemps que le Renderer.
+    uint32_t addSharedIndices(const std::vector<uint32_t>& indices);
+
+    // Tuile de terrain sur une topologie partagee, ECRITE PAR L'APPELANT :
+    // beginTerrainMesh reserve la place et rend un pointeur sur `vertexCount`
+    // sommets a remplir - directement la memoire que le GPU lira en memoire
+    // unifiee, un staging sinon - et endTerrainMesh la livre. Entre les deux,
+    // l'ecriture peut se faire depuis N'IMPORTE QUEL thread (aucun appel
+    // Vulkan) : c'est ce qui laisse le maillage parallele de la Phase 19
+    // ecrire sans copie intermediaire. begin et end, eux, restent sur le
+    // thread de rendu, et chaque begin doit etre suivi de son end (ou d'un
+    // removeMesh si l'ecriture a echoue).
+    struct TerrainMeshWrite {
+        MeshHandle mesh = kInvalidMesh;
+        TerrainVertex* vertices = nullptr;
+    };
+    TerrainMeshWrite beginTerrainMesh(uint32_t vertexCount, uint32_t sharedIndices);
+    void endTerrainMesh(MeshHandle mesh);
+
+    // PHASE 30 : grille de la heightmap, lue par terrain.vert pour recalculer
+    // la position horizontale et l'UV des sommets de terrain (voir
+    // UniformBufferObject::terrainGrid). A appeler une fois, avant la premiere
+    // image, des qu'un terrain est charge.
+    void setTerrainGrid(float origin, float spacing, uint32_t cells);
+
+    // PHASE 30 : bilan du pool de geometrie, pour le journal.
+    std::string geometryLine() const;
 
     // Libere une geometrie et rend sa poignee reutilisable. Indispensable depuis
     // la Phase 10 : le streaming par tuiles cree et detruit des maillages en
@@ -233,7 +285,7 @@ public:
     // garanti par construction - le seul appelant est addMesh, et removeMesh
     // DIFFERE la destruction des buffers de kMaxFramesInFlight + 1 frames.
     void enqueueCopy(std::unique_ptr<VulkanBuffer> staging,
-                     VkBuffer destination) override;
+                     VkBuffer destination, VkDeviceSize destinationOffset) override;
 
     // Octets de staging en attente d'enregistrement + en attente d'execution.
     // Sert au journal de diagnostic du streaming.
@@ -266,6 +318,7 @@ private:
     glm::vec4 precip_{0.0f, 0.0f, 0.0f, 0.0f};
     glm::vec4 fall_{0.0f, -6.5f, 0.0f, 0.0f};
     glm::vec4 detail_{0.0f, 0.0f, 1.0f, 1.0f};
+    glm::vec4 terrainGrid_{0.0f, 1.0f, 1.0f, 0.0f}; // PHASE 30, voir setTerrainGrid()
 
     static constexpr int kMaxFramesInFlight = 2;
 
@@ -306,11 +359,44 @@ private:
     void uploadInstances(const std::vector<InstancedDrawItem>& instanced);
     void recreateSwapChain();
 
+    // PHASE 30. Ecriture dans une plage du pool : `destination` pointe soit
+    // dans la plage elle-meme (memoire unifiee), soit dans un staging, et
+    // finishRangeWrite confie alors la copie a la prochaine image.
+    struct RangeWrite {
+        GpuRange range;
+        void* destination = nullptr;
+        std::unique_ptr<VulkanBuffer> staging;
+    };
+    RangeWrite beginRangeWrite(const GpuRange& range);
+    void finishRangeWrite(RangeWrite& write);
+
+    // Inscrit un Mesh dans la table et rend sa poignee (emplacement libre
+    // reutilise s'il y en a un).
+    MeshHandle registerMesh(std::unique_ptr<Mesh> mesh);
+
     VulkanContext& context_;
     Window& window_;
     RenderOptions options_;
 
     std::unique_ptr<SwapChain> swapChain_;
+
+    // PHASE 30 : TOUTE la geometrie (sommets et indices, objets et terrain)
+    // vit dans les blocs de ce pool. Declare AVANT les tables de maillages :
+    // les membres etant detruits dans l'ordre inverse, il survit a tous les
+    // Mesh, qui lui rendent leurs plages en se detruisant.
+    std::unique_ptr<GpuBufferPool> geometryPool_;
+
+    // Topologies partagees (addSharedIndices), rendues a la destruction.
+    struct SharedIndices {
+        GpuRange range;
+        uint32_t count = 0;
+        VkIndexType type = VK_INDEX_TYPE_UINT16;
+    };
+    std::vector<SharedIndices> sharedIndices_;
+
+    // Tuiles commencees (beginTerrainMesh) dont l'ecriture passe par un
+    // staging, en attente de leur endTerrainMesh.
+    std::unordered_map<MeshHandle, RangeWrite> pendingTerrainWrites_;
 
     // Un pipeline par materiau, indexe par la valeur de l'enum Material. Tous
     // partagent le meme descriptor set layout et le meme push constant range :
@@ -348,6 +434,7 @@ private:
     struct PendingCopy {
         std::unique_ptr<VulkanBuffer> staging;
         VkBuffer destination = VK_NULL_HANDLE;
+        VkDeviceSize destinationOffset = 0;
         VkDeviceSize size = 0;
     };
     std::vector<PendingCopy> pendingCopies_;

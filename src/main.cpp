@@ -144,6 +144,9 @@ namespace {
 //   vercora.exe [scene] --freeze-anim        -> horloge d'animation des shaders
 //                                               figee : images comparables au
 //                                               pixel pres d'un run a l'autre
+//   vercora.exe [scene] --force-staging      -> geometrie televersee par staging
+//                                               meme en memoire unifiee (chemin
+//                                               d'un GPU discret, a eprouver)
 //
 // Le terrain synthetique n'est PAS supprime, et pour deux raisons distinctes :
 // il reste la scene de reference des tests (monde deterministe, arbres a
@@ -895,6 +898,9 @@ int main(int argc, char** argv) {
         //                   optimisation ne change pas l'image.
         float quitAfterSeconds = 0.0f;
         bool freezeAnimation = false;
+        // PHASE 30 : --force-staging televerse la geometrie par staging meme en
+        // memoire unifiee (le chemin d'un GPU discret), pour l'eprouver ici.
+        bool forceStaging = false;
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--dump-world") {
@@ -1065,6 +1071,8 @@ int main(int argc, char** argv) {
                 }
             } else if (argument == "--freeze-anim") {
                 freezeAnimation = true;
+            } else if (argument == "--force-staging") {
+                forceStaging = true;
             } else if (argument.rfind("--", 0) == 0) {
                 logWarn("Option inconnue, ignoree : " + argument);
             } else if (sceneArgument.empty()) {
@@ -1199,7 +1207,10 @@ int main(int argc, char** argv) {
         CompositeCollisionSolver worldSolver;
 
         MeshData sceneMesh;
+        // PHASE 30 : le terrain d'un seul bloc (--no-lod) au format GPU compact.
+        TerrainGpuMesh sceneTerrain;
         RenderOptions renderOptions;
+        renderOptions.forceStaging = forceStaging;
 
         Inventory inventory;
 
@@ -1219,7 +1230,10 @@ int main(int argc, char** argv) {
             //     produisait 25 M de sommets et 50 M de triangles cote CPU,
             //     recopies ensuite sur le GPU.
             if (!dumpWorldOnly && !useLod) {
-                sceneMesh = terrainMeshData(*heightmap);
+                // PHASE 30 : directement au format GPU du terrain (16 octets par
+                // sommet), sans le MeshData de 68 octets par sommet - 1,7 Go de
+                // moins au pic sur la zone au pas de 1 m.
+                sceneTerrain = terrainGpuMeshData(*heightmap);
             }
 
             renderOptions.heightRange = { heightmap->minHeight(), heightmap->maxHeight() };
@@ -1301,8 +1315,19 @@ int main(int argc, char** argv) {
         // nombre d'instances qui les utiliseront ensuite.
         // Avec le quadtree, il n'y a pas de geometrie de scene unique : chaque
         // tuile est enregistree et liberee par le TerrainStreamer.
-        const MeshHandle sceneMeshHandle =
+        MeshHandle sceneMeshHandle =
             sceneMesh.empty() ? kInvalidMesh : renderer.addMesh(sceneMesh);
+        if (!sceneTerrain.vertices.empty()) {
+            sceneMeshHandle = renderer.addTerrainMesh(sceneTerrain.vertices, sceneTerrain.indices,
+                                                      sceneTerrain.name);
+            sceneTerrain = TerrainGpuMesh{}; // la copie CPU n'a plus de raison d'etre
+        }
+        // PHASE 30 : la grille de la heightmap, dont terrain.vert deduit la
+        // position horizontale et l'UV de chaque sommet de terrain.
+        if (terrainScene) {
+            renderer.setTerrainGrid(heightmap->worldCoord(0), heightmap->spacing(),
+                                    heightmap->resolution() - 1);
+        }
 
         // ------------------------------------------------------------------
         // 2 bis. Orthophoto (Phase 11). Chargee APRES le Renderer, qui possede
@@ -3564,9 +3589,13 @@ int main(int argc, char** argv) {
                     frameProfile.streamingMicros += profileMicros(tf1, tf2);
                 } else if (sceneMeshHandle != kInvalidMesh) {
                     // Terrain d'un seul bloc : sommets deja en coordonnees monde
-                    // -> matrice identite, et pas de bande de morphing.
-                    drawItems.push_back({ sceneMeshHandle, glm::mat4(1.0f),
-                                          Material::Terrain });
+                    // -> matrice identite, et pas de bande de morphing. PHASE 30 :
+                    // une seule "tuile" qui couvre toute la grille au pas 1.
+                    DrawItem terrainItem{ sceneMeshHandle, glm::mat4(1.0f),
+                                          Material::Terrain };
+                    terrainItem.grid = glm::ivec4(0, 0, 1,
+                                                  static_cast<int32_t>(heightmap->resolution()));
+                    drawItems.push_back(terrainItem);
                 }
 
                 for (const Tree& tree : forest->trees()) {

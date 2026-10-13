@@ -76,6 +76,18 @@ struct DrawItem {
     //     profondeur. Une force nulle - le cas de tous les DrawItem du jeu -
     //     laisse le rendu strictement identique a celui d'avant la Phase 15.
     glm::vec4  params{0.0f, 0.0f, 0.0f, 0.0f};
+
+    // PHASE 30, Material::Terrain seulement : ou se trouve le maillage dans la
+    // grille de la heightmap, pour que terrain.vert y retrouve la position
+    // horizontale et l'UV de chaque sommet a partir de gl_VertexIndex au lieu
+    // de les lire dans le buffer (voir renderer/GpuVertex.hpp, TerrainVertex).
+    //   x, y = indices de grille (ix, iz) du premier sommet
+    //   z    = pas, en echantillons de grille, entre deux sommets voisins
+    //   w    = sommets par rangee
+    // Une tuile de quadtree pousse (node.ix0, node.iz0, node.stride, 65) ; le
+    // terrain d'un seul bloc (--no-lod) pousse (0, 0, 1, resolution).
+    // Ignore par les autres materiaux.
+    glm::ivec4 grid{0, 0, 1, 1};
 };
 
 // Ce que le Renderer pousse REELLEMENT en push constant, dans cet ordre.
@@ -85,12 +97,15 @@ struct DrawItem {
 // melanger obligerait a garder `mesh` et `material` - inutiles au GPU - dans un
 // budget de push constants qui ne fait que 128 octets garantis.
 //
-// 80 octets : toujours tres en dessous des 128 garantis par la spec Vulkan pour
-// maxPushConstantsSize.
+// 96 octets depuis la Phase 30 (le bloc `grid` du terrain) : toujours en
+// dessous des 128 garantis par la spec Vulkan pour maxPushConstantsSize.
 struct DrawItemPush {
     glm::mat4 model{1.0f};
     glm::vec4 params{0.0f, 0.0f, 0.0f, 0.0f};
+    glm::ivec4 grid{0, 0, 1, 1};
 };
+static_assert(sizeof(DrawItemPush) == 96 && sizeof(DrawItemPush) <= 128,
+              "Le bloc de push constants doit tenir dans les 128 octets garantis.");
 
 // ---------------------------------------------------------------------------
 // PHASE 11 : dessin INSTANCIE

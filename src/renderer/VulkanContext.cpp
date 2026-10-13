@@ -235,6 +235,7 @@ void VulkanContext::pickPhysicalDevice() {
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(physicalDevice_, &props);
     logInfo(std::string("GPU selectionne : ") + props.deviceName);
+    deviceType_ = props.deviceType;
 
     // PHASE 30 : proprietes memoire lues UNE fois (voir findMemoryType), et
     // detection de la memoire unifiee.

@@ -33,10 +33,12 @@ public:
     virtual ~BufferUploader() = default;
 
     // Enregistre une copie de `staging` (integralite de sa taille) vers
-    // `destination`. Prend possession de `staging`, qui sera detruit quand la
-    // frame ayant execute la copie sera terminee.
+    // `destination`, a partir de l'octet `destinationOffset` (PHASE 30 : la
+    // destination est une PLAGE d'un bloc partage, voir GpuBufferPool). Prend
+    // possession de `staging`, qui sera detruit quand la frame ayant execute la
+    // copie sera terminee.
     virtual void enqueueCopy(std::unique_ptr<VulkanBuffer> staging,
-                             VkBuffer destination) = 0;
+                             VkBuffer destination, VkDeviceSize destinationOffset) = 0;
 };
 
 // Buffer Vulkan reutilisable : creation, allocation memoire, bind, map,

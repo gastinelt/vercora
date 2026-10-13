@@ -41,15 +41,15 @@ Pipeline::Pipeline(VkDevice device, VkRenderPass renderPass, VkDescriptorSetLayo
 
     const std::array<VkPipelineShaderStageCreateInfo, 2> stages = { vertStage, fragStage };
 
-    // Vertex input : un binding entrelace, et autant d'attributs que le vertex
-    // shader en consomme reellement - quatre (pos, color, normal, uv) pour les
-    // objets, six pour le terrain, dont la cible de geomorphing. Le STRIDE, lui,
-    // reste toujours sizeof(Vertex) : le format de sommet cote C++ est unique.
-    const auto bindingDescription = vertexBindingDescription();
-    const auto attributeDescriptions = vertexAttributeDescriptions();
-    const uint32_t attributeCount = shaders.usesMorphAttributes
-        ? static_cast<uint32_t>(attributeDescriptions.size())
-        : 4u;
+    // Vertex input : un binding entrelace, au format de la famille de shaders
+    // (PHASE 30, voir renderer/GpuVertex.hpp) - ObjectVertex pour les objets
+    // et la vegetation, TerrainVertex pour le terrain.
+    const VkVertexInputBindingDescription bindingDescription =
+        shaders.terrainVertexLayout ? terrainBindingDescription()
+                                    : objectBindingDescription();
+    const std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions =
+        shaders.terrainVertexLayout ? terrainAttributeDescriptions()
+                                    : objectAttributeDescriptions();
 
     // PHASE 11 : un materiau instancie decrit DEUX bindings (sommets et
     // instances) et concatene leurs attributs. Les tableaux sont construits ici
@@ -59,7 +59,7 @@ Pipeline::Pipeline(VkDevice device, VkRenderPass renderPass, VkDescriptorSetLayo
 
     std::vector<VkVertexInputBindingDescription> bindings{ bindingDescription };
     std::vector<VkVertexInputAttributeDescription> attributes(
-        attributeDescriptions.begin(), attributeDescriptions.begin() + attributeCount);
+        attributeDescriptions.begin(), attributeDescriptions.end());
 
     // PHASE 27 : une passe plein ecran ne lit AUCUN buffer de sommets.
     if (shaders.fullscreenOverlay) {
@@ -99,6 +99,14 @@ Pipeline::Pipeline(VkDevice device, VkRenderPass renderPass, VkDescriptorSetLayo
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_NONE; // pas de culling : triangle toujours visible
     rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    if (shaders.cullBackFaces) {
+        // PHASE 30 : voir ShaderSet::cullBackFaces. Le terrain est enroule
+        // (v00, v01, v11) avec Z vers le sud ; une fois l'axe Y de la
+        // projection retourne (Renderer::projectionMatrix), une face vue
+        // d'en haut est tramee dans le sens ANTIHORAIRE du framebuffer.
+        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    }
     rasterizer.depthBiasEnable = VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
