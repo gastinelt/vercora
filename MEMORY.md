@@ -5,8 +5,10 @@ voir `NOTES-PHASE6.md`, `NOTES-PHASE7.md`, `NOTES-PHASE9.md`, `NOTES-PHASE10.md`
 `NOTES-PHASE11.md`, `NOTES-PHASE12.md`, `NOTES-PHASE-VELO.md`,
 `NOTES-PHASE-ESCALADE.md`, `NOTES-PHASE15.md`, `NOTES-PHASE16.md`,
 `NOTES-PHASE17.md`, `NOTES-PHASE18.md`, `NOTES-PHASE19.md`,
-`NOTES-PHASE20.md` et `NOTES-PHASE21.md` ; ce fichier est
+`NOTES-PHASE20.md` a `NOTES-PHASE30.md` (plus `NOTES-PHASE28-DESIGN.md`,
+`NOTES-PHASE29-DESIGN.md`) et l'audit `NOTES-AUDIT-GLOBAL.md` ; ce fichier est
 un resume vivant, mis a jour a la fin de chaque session, pas un journal complet.
+Le `README.md` a la racine donne le demarrage rapide (build, lancement, tests).
 
 ## Ce qu'est Vercora
 
@@ -21,6 +23,35 @@ simplifie, chiffre et teste - mais plus aucune n'est vide.
 MONDE - une partie normale les charge, les dessine et s'y cogne. Suite du
 2026-08-23 : **F3/F4 selectionnent l'objet pose suivant/precedent SANS viser**
 (detail plus bas, section Phase 15).
+
+## Etat verifie (2026-10-14, fin de Phase 30)
+
+Ce bloc complete celui de la Phase 20 ci-dessous, qui reste vrai sauf mention.
+
+- **Builds** : Windows inchange (`tools\build.bat`, `tools\run_logic_tests.bat`).
+  **Linux** depuis la Phase 30 : `cmake -S . -B build-rel -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DGLFW_BUILD_WAYLAND=OFF && ninja -C build-rel`
+  (GCC 13 / Clang 18). Les tests headless se compilent avec la meme liste de
+  sources que `run_logic_tests.bat`.
+- **Tests headless** : 3 963 verifications sans les dalles LiDAR (25 de plus
+  avec elles). +20 en Phase 30 (formats GPU, allocateur, orthophoto par tranches).
+- **Ressources** : chaque partie journalise `Ressources (PHASE 30)` au
+  chargement, toutes les 10 s et a la fermeture : RAM du processus, memoire GPU
+  exacte (toute allocation passe par `VulkanContext::allocateMemory`), blocs et
+  appels `vkAllocateMemory`, et occupation du pool de geometrie.
+- **Format GPU** : `Vertex` (68 o) n'est plus que le format CPU ; le GPU lit
+  `ObjectVertex` (44 o) et `TerrainVertex` (16 o), dans les blocs de 4 Mo de
+  `GpuBufferPool`. Ecriture directe en memoire unifiee (UHD 770), staging sinon
+  (`--force-staging` pour l'eprouver).
+- **Options ajoutees** : `--quit-after=S`, `--freeze-anim`, `--force-staging`,
+  `--vsync` (presentation FIFO, a prendre pour JOUER ; les mesures restent non
+  plafonnees).
+- **Validation de synchronisation** : la variable qui fonctionne avec les couches
+  1.3.275 est `VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT`.
+- **Sans GPU ni donnees** (session cloud) : lavapipe + Xvfb, zone proxy par
+  `tools/make_bench_zone.py`. Recette complete : NOTES-PHASE30.md section 9.
+- **Comparaisons d'images** : ajouter `--no-wildlife` (la faune bouge en temps
+  reel) en plus de `--lock-input --look --time-scale=0 --freeze-anim`.
 
 ## Etat verifie (2026-08-26, fin de Phase 20)
 
@@ -1675,7 +1706,10 @@ Deux points rouges, aucun imputable a la phase :
    collision, catalogue, placement et serialisation sont deja agnostiques du
    format. Compter un analyseur JSON, le conteneur `.glb`, les accesseurs et
    l'aplatissement de la hierarchie de noeuds.
-0bis. **Paralleliser la construction des tuiles** (Phase 18) : c'est 83 % du
+0bis. (Phase 30 : une tuile interieure se construit desormais sans relecture -
+   ~104 us en Release lavapipe - et s'ecrit directement en memoire GPU, sans
+   MeshData ni copie : le gain a attendre du parallelisme a encore baisse.)
+   **Paralleliser la construction des tuiles** (Phase 18) : c'est 83 % du
    cout d'une tuile apres les optimisations exactes de cette phase, et
    `terrainNodeMeshData` est deja PURE. Le seul obstacle est
    `Renderer::addMesh`, qui doit rester sur le thread de rendu.
@@ -1686,7 +1720,10 @@ Deux points rouges, aucun imputable a la phase :
 3. ~~Transfert asynchrone des tuiles de terrain.~~ **FAIT EN PHASE 12.** Le
    verrou suivant est le **maillage CPU d'une tuile**, toujours synchrone sur le
    thread de rendu : un thread de maillage dedie est la suite logique.
-4. **Index buffer partage** entre toutes les tuiles, et **sommet allege** (delta
+4. ~~**Index buffer partage** et **sommet allege**~~ **FAITS EN PHASE 30**
+   (topologie uint16 unique, TerrainVertex de 16 o). Suite possible : tirer
+   les altitudes d'un SSBO (16 -> ~4,5 o/sommet), voir NOTES-PHASE30.md.
+   Texte d'origine : **Index buffer partage** entre toutes les tuiles, et **sommet allege** (delta
    de morphing plutot que position complete) : deux economies faciles, chiffrees
    dans NOTES-PHASE10.md. Le partage de l'index buffer economiserait aussi
    98 Ko par tuile epinglee.
