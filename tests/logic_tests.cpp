@@ -37,6 +37,8 @@
 #include "editor/PlacedObject.hpp"
 #include "editor/SceneFile.hpp"
 #include "renderer/DrawItem.hpp"
+#include "renderer/GpuVertex.hpp"
+#include "renderer/RangeAllocator.hpp"
 #include "renderer/TerrainMesh.hpp"
 #include "renderer/TerrainNodeMesh.hpp"
 #include "world/AnimalMesh.hpp"
@@ -3197,6 +3199,62 @@ void testTextureFile() {
         threw = true;
     }
     check(threw, "Refus : fichier .vcto absent");
+
+    // --- PHASE 32 : en-tete seul, puis charge utile lue a la demande --------
+    // Le chargement de l'orthophoto ne tient plus la charge utile en RAM : il
+    // lit l'en-tete, puis des TRANCHES directement dans le staging. Les deux
+    // chemins doivent rendre exactement les memes octets que loadTextureFile.
+    {
+        const std::string path =
+            (std::filesystem::temp_directory_path() / "vercora_phase32_test.vcto").string();
+        std::vector<unsigned char> payload;
+        const uint32_t width = 8;
+        const uint32_t height = 4;
+        uint32_t levels = 0;
+        for (uint32_t w = width, h = height;; w = std::max(1u, w / 2), h = std::max(1u, h / 2)) {
+            for (uint32_t k = 0; k < w * h * 4; ++k) {
+                payload.push_back(static_cast<unsigned char>((payload.size() * 37u + 11u) & 0xFFu));
+            }
+            ++levels;
+            if (w == 1 && h == 1) {
+                break;
+            }
+        }
+        unsigned char header[128] = {};
+        std::memcpy(header, "VCTO", 4);
+        const uint32_t fields[5] = { 1u, width, height, levels, 0u /* RGBA8 */ };
+        std::memcpy(header + 4, fields, sizeof(fields));
+        const double extent[4] = { 899000.0, 6435000.0, 904000.0, 6440000.0 };
+        std::memcpy(header + 24, extent, sizeof(extent));
+        const uint32_t epsg = 2154u;
+        std::memcpy(header + 56, &epsg, sizeof(epsg));
+        {
+            std::ofstream out(path, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(header), sizeof(header));
+            out.write(reinterpret_cast<const char*>(payload.data()),
+                      static_cast<std::streamsize>(payload.size()));
+        }
+
+        const TextureData full = loadTextureFile(path);
+        const TextureData headerOnly = loadTextureFileHeader(path);
+        check(full.pixels == payload && full.payloadSize() == payload.size(),
+              "Phase 32 : loadTextureFile rend la charge utile complete");
+        check(headerOnly.pixels.empty() && headerOnly.payloadSize() == payload.size() &&
+                  headerOnly.mips.size() == full.mips.size(),
+              "Phase 32 : l'en-tete seul decrit la meme chaine, sans aucun texel");
+
+        std::vector<unsigned char> whole(payload.size());
+        readTexturePayload(path, headerOnly, whole.data());
+        std::vector<unsigned char> banded(payload.size());
+        std::ifstream in(path, std::ios::binary);
+        for (uint64_t offset = 0; offset < payload.size(); offset += 24) {
+            const uint64_t bytes = std::min<uint64_t>(24, payload.size() - offset);
+            readTexturePayload(in, offset, bytes, banded.data() + offset);
+        }
+        check(whole == payload && banded == payload,
+              "Phase 32 : lecture directe et lecture par tranches = memes octets");
+        std::filesystem::remove(path);
+    }
 }
 
 void testGrassMesh() {
@@ -10870,6 +10928,225 @@ void testBushPlacement() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// PHASE 32 : formats GPU compacts et sous-allocation de la geometrie
+// ---------------------------------------------------------------------------
+// Ce que le GPU lit n'est plus le format de travail `Vertex` (68 octets) mais
+// ObjectVertex (44) et TerrainVertex (16), et toute la geometrie vit dans des
+// plages de blocs partages. Rien de cela ne se VOIT si c'est faux d'un octet :
+// un decalage d'allocateur ecrase la geometrie d'un voisin, une position
+// recalculee differemment fait trembler les jointures de tuiles. D'ou ces
+// verifications, faites sans GPU.
+void testGpuFormatsPhase32() {
+    section("Phase 32 : formats GPU compacts et pool de geometrie");
+
+    check(sizeof(ObjectVertex) == 44 && sizeof(TerrainVertex) == 16 &&
+              sizeof(DrawItemPush) == 96,
+          "Phase 32 : 44 / 16 octets par sommet, 96 octets de push constants");
+
+    // --- ObjectVertex : conversion EXACTE -----------------------------------
+    {
+        Vertex v{};
+        v.pos = { 1.25f, -3.5f, 1234.567f };
+        v.color = { 0.42f, 0.13f, 0.99f };
+        v.normal = { 0.1f, 0.9f, -0.2f };
+        v.uv = { 0.333f, 0.777f };
+        v.morphPos = { 9.0f, 9.0f, 9.0f };
+        const ObjectVertex o = toObjectVertex(v);
+        check(o.pos == v.pos && o.color == v.color && o.normal == v.normal && o.uv == v.uv,
+              "ObjectVertex : position, couleur, normale et UV recopiees au bit pres");
+    }
+
+    // --- snorm16 : la convention de VK_FORMAT_R16_SNORM ---------------------
+    {
+        float worst = 0.0f;
+        for (int k = -2000; k <= 2000; ++k) {
+            const float value = static_cast<float>(k) / 2000.0f;
+            worst = std::max(worst, std::abs(unpackSnorm16(packSnorm16(value)) - value));
+        }
+        check(worst <= 0.5f / 32767.0f + 1e-7f,
+              "snorm16 : erreur d'aller-retour d'au plus un demi-pas (1,5e-5)");
+        check(packSnorm16(1.0f) == 32767 && packSnorm16(-1.0f) == -32767 &&
+                  packSnorm16(7.0f) == 32767 && packSnorm16(-7.0f) == -32767 &&
+                  unpackSnorm16(-32768) == -1.0f,
+              "snorm16 : bornes et ecretage");
+
+        // Normales de champ de hauteur, du plat a la paroi (pente 20) : la
+        // reconstruction de y depuis x et z quantifies reste a 1e-3 pres
+        // (et a 1e-4 pres jusqu'a une pente de 5, soit 79 degres).
+        float worstNormal = 0.0f;
+        float worstNormalModerate = 0.0f;
+        for (int a = 0; a < 64; ++a) {
+            for (int b = 0; b < 16; ++b) {
+                const float slope = 20.0f * static_cast<float>(b) / 15.0f;
+                const float angle = 6.2831853f * static_cast<float>(a) / 64.0f;
+                const glm::vec3 n = glm::normalize(
+                    glm::vec3(-slope * std::cos(angle), 1.0f, -slope * std::sin(angle)));
+                const int16_t packed[2] = { packSnorm16(n.x), packSnorm16(n.z) };
+                const float error = glm::length(unpackTerrainNormal(packed) - n);
+                worstNormal = std::max(worstNormal, error);
+                if (slope <= 5.0f) {
+                    worstNormalModerate = std::max(worstNormalModerate, error);
+                }
+            }
+        }
+        check(worstNormal < 1e-3f && worstNormalModerate < 1e-4f,
+              "TerrainVertex : normale reconstruite a 1e-4 pres jusqu'a 79 degres");
+    }
+
+    // --- Tuiles : le format GPU est le format de reference, compacte --------
+    // writeTerrainNodeVertices (chemin du streamer) doit rendre EXACTEMENT
+    // toTerrainVertex(terrainNodeMeshData) pour CHAQUE noeud, grilles paire et
+    // impaire, avec et sans la grille du parent mise en cache.
+    {
+        Heightmap::Params even;
+        even.resolution = 513;
+        even.worldSize = 512.0f;
+        even.seed = 3030u;
+        Heightmap::Params odd;
+        odd.resolution = 128;
+        odd.worldSize = 127.0f;
+        odd.seed = 3031u;
+        // Assez grande pour que des tuiles de niveau 2 et 3 soient INTERIEURES
+        // (chemin rapide de writeTerrainNodeVertices a plusieurs pas).
+        Heightmap::Params large;
+        large.resolution = 2049;
+        large.worldSize = 4096.0f;
+        large.amplitude = 900.0f;
+        large.seed = 3033u;
+        TerrainQuadtree::Params qparams;
+        qparams.nodeCells = 64;
+
+        bool identical = true;
+        bool positionsExact = true;
+        bool uvExact = true;
+        uint32_t nodesChecked = 0;
+        uint32_t fastNodes = 0;
+        uint32_t fastStrides = 0; // masque des pas couverts par le chemin rapide
+        for (const Heightmap::Params& hp : { even, odd, large }) {
+            const Heightmap heightmap(hp);
+            const TerrainQuadtree quadtree(heightmap, qparams);
+            const uint32_t verts = qparams.nodeCells + 1;
+            const uint32_t cells = heightmap.resolution() - 1;
+            const float origin = heightmap.worldCoord(0);
+            std::vector<TerrainVertex> written(static_cast<std::size_t>(verts) * verts);
+            for (uint32_t index = 0; index < quadtree.nodeCount(); ++index) {
+                if (terrainNodeUsesFastPath(heightmap, quadtree, index)) {
+                    ++fastNodes;
+                    fastStrides |= quadtree.node(index).stride;
+                }
+                for (const bool cached : { true, false }) {
+                    const MeshData reference =
+                        terrainNodeMeshData(heightmap, quadtree, index, false, cached);
+                    writeTerrainNodeVertices(heightmap, quadtree, index, written.data(), cached);
+                    for (std::size_t v = 0; v < written.size() && identical; ++v) {
+                        const TerrainVertex expected = toTerrainVertex(reference.vertices[v]);
+                        identical = std::memcmp(&expected, &written[v], sizeof(TerrainVertex)) == 0;
+                    }
+                }
+                // Ce que terrain.vert recalcule a partir de gl_VertexIndex et de
+                // DrawItem::grid : memes indices ecretes, memes operations.
+                const TerrainQuadtree::Node& node = quadtree.node(index);
+                const MeshData reference = terrainNodeMeshData(heightmap, quadtree, index, false);
+                for (uint32_t v = 0; v < verts * verts; ++v) {
+                    const uint32_t i = v % verts;
+                    const uint32_t j = v / verts;
+                    const uint32_t gx = std::min(node.ix0 + i * node.stride, cells);
+                    const uint32_t gz = std::min(node.iz0 + j * node.stride, cells);
+                    const uint32_t mx = std::min(node.ix0 + (i & ~1u) * node.stride, cells);
+                    const uint32_t mz = std::min(node.iz0 + (j & ~1u) * node.stride, cells);
+                    const Vertex& r = reference.vertices[v];
+                    positionsExact = positionsExact &&
+                        terrainGridCoord(origin, heightmap.spacing(), gx) == r.pos.x &&
+                        terrainGridCoord(origin, heightmap.spacing(), gz) == r.pos.z &&
+                        terrainGridCoord(origin, heightmap.spacing(), mx) == r.morphPos.x &&
+                        terrainGridCoord(origin, heightmap.spacing(), mz) == r.morphPos.z;
+                    uvExact = uvExact &&
+                        static_cast<float>(gx) / static_cast<float>(cells) == r.uv.x &&
+                        static_cast<float>(gz) / static_cast<float>(cells) == r.uv.y;
+                }
+                ++nodesChecked;
+            }
+        }
+        check(nodesChecked > 400, "Tuiles : toutes les tuiles des trois grilles verifiees");
+        check(fastNodes > 0 && fastNodes < nodesChecked && (fastStrides & 0xFu) == 0xFu,
+              "Tuiles : chemin rapide ET chemin de reference exerces (pas 1, 2, 4 et 8)");
+        check(identical,
+              "Tuiles : writeTerrainNodeVertices == toTerrainVertex(reference), au bit pres");
+        check(positionsExact,
+              "Tuiles : x/z et cible de morphing recalcules depuis l'indice, au bit pres");
+        check(uvExact, "Tuiles : UV recalcule depuis l'indice de grille, au bit pres (CPU)");
+
+        const std::vector<uint32_t> topology = terrainNodeIndices(qparams.nodeCells);
+        check(*std::max_element(topology.begin(), topology.end()) <= 0xFFFFu,
+              "Tuiles : la topologie partagee tient en uint16");
+    }
+
+    // --- Terrain d'un seul bloc (--no-lod) ------------------------------------
+    {
+        Heightmap::Params hp;
+        hp.resolution = 97;
+        hp.worldSize = 96.0f;
+        hp.seed = 3032u;
+        const Heightmap heightmap(hp);
+        const MeshData reference = terrainMeshData(heightmap);
+        const TerrainGpuMesh gpu = terrainGpuMeshData(heightmap);
+        bool same = gpu.vertices.size() == reference.vertices.size() &&
+                    gpu.indices == reference.indices;
+        for (std::size_t v = 0; v < gpu.vertices.size() && same; ++v) {
+            TerrainVertex expected = toTerrainVertex(reference.vertices[v]);
+            // Sans geomorphing, la cible est le sommet lui-meme (elle valait
+            // zero dans le format de 68 octets, et n'etait jamais lue).
+            expected.morphHeight = expected.height;
+            expected.morphNormal[0] = expected.normal[0];
+            expected.morphNormal[1] = expected.normal[1];
+            same = std::memcmp(&expected, &gpu.vertices[v], sizeof(TerrainVertex)) == 0;
+        }
+        check(same, "Bloc unique : terrainGpuMeshData == reference compactee, memes indices");
+    }
+
+    // --- RangeAllocator : la logique du pool, sans GPU ----------------------
+    {
+        RangeAllocator block(1 << 20);
+        struct Taken { uint64_t offset; uint64_t size; };
+        std::vector<Taken> taken;
+        bool aligned = true;
+        for (uint64_t k = 0; k < 40; ++k) {
+            const uint64_t size = 1000 + 777 * (k % 7);
+            const uint64_t offset = block.allocate(size, 256);
+            if (offset == RangeAllocator::kInvalid) { aligned = false; break; }
+            aligned = aligned && (offset % 256 == 0);
+            taken.push_back({ offset, size });
+        }
+        bool disjoint = true;
+        for (std::size_t a = 0; a < taken.size(); ++a) {
+            for (std::size_t b = a + 1; b < taken.size(); ++b) {
+                disjoint = disjoint && (taken[a].offset + taken[a].size <= taken[b].offset ||
+                                        taken[b].offset + taken[b].size <= taken[a].offset);
+            }
+        }
+        check(aligned && taken.size() == 40, "RangeAllocator : 40 plages alignees sur 256");
+        check(disjoint, "RangeAllocator : aucune plage n'en chevauche une autre");
+
+        // Un trou laisse par une plage liberee est reutilise par une demande de
+        // meme taille (le cas des tuiles, toutes de la meme taille).
+        const Taken hole = taken[10];
+        block.release(hole.offset, hole.size);
+        check(block.allocate(hole.size, 256) == hole.offset,
+              "RangeAllocator : un trou est reutilise par une demande de meme taille");
+
+        for (const Taken& t : taken) {
+            block.release(t.offset, t.size);
+        }
+        check(block.empty() && block.freeSpanCount() == 1 &&
+                  block.largestFree() == block.capacity(),
+              "RangeAllocator : tout liberer refusionne le bloc en une seule plage");
+        check(block.allocate(block.capacity() + 1, 256) == RangeAllocator::kInvalid &&
+                  block.allocate(16, 3) == RangeAllocator::kInvalid,
+              "RangeAllocator : demande trop grande ou alignement invalide refuses");
+    }
+}
+
 int main() {
     std::printf("=== Tests logiques Vercora (headless, sans Vulkan) ===\n");
 
@@ -10890,6 +11167,7 @@ int main() {
     testGrassMesh();
     testGrassPhase18();
     testTileMeshingIsThreadSafe();
+    testGpuFormatsPhase32();
     testVegetationPlacement();
     testGrassPlacement();
     testInstanceLayout();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "renderer/GpuVertex.hpp"
 #include "renderer/MeshData.hpp"
 
 #include <cstdint>
@@ -62,5 +63,32 @@ MeshData terrainNodeMeshData(const Heightmap& heightmap, const TerrainQuadtree& 
 // Topologie commune a tous les noeuds : deux triangles par cellule, meme
 // diagonale que TerrainMesh. Calculee une fois par appelant et reutilisee.
 std::vector<uint32_t> terrainNodeIndices(uint32_t nodeCells);
+
+// PHASE 32. Les MEMES sommets que terrainNodeMeshData, ecrits directement au
+// format GPU du terrain (TerrainVertex, 16 octets) dans `out`, qui doit pouvoir
+// en recevoir (nodeCells + 1)^2. C'est le chemin du TerrainStreamer : `out`
+// pointe dans la memoire que le GPU lira (ou dans un staging), et aucun
+// MeshData de 287 Ko n'est plus construit puis recopie par tuile.
+//
+// Garantie, verifiee par tests/logic_tests.cpp : pour tout noeud,
+// out[v] == toTerrainVertex(terrainNodeMeshData(...).vertices[v]) AU BIT PRES -
+// memes altitudes, memes normales avant quantification. C'est
+// terrainNodeMeshData qui reste la reference testee de la geometrie (positions,
+// morphing, bords) ; cette fonction n'en est qu'un autre format de sortie.
+//
+// Pure et sans etat partage, comme terrainNodeMeshData : appelable depuis
+// plusieurs threads sur des noeuds et des sorties distincts (Phase 19).
+// Lance std::runtime_error pour les memes raisons.
+void writeTerrainNodeVertices(const Heightmap& heightmap, const TerrainQuadtree& quadtree,
+                              uint32_t nodeIndex, TerrainVertex* out,
+                              bool reuseParentGrid = true);
+
+// PHASE 32. true si writeTerrainNodeVertices prend le chemin RAPIDE pour ce
+// noeud : une tuile assez loin du bord du terrain pour qu'aucun des
+// echantillons qu'elle lit (ses sommets, leurs voisins au pas du noeud, et
+// ceux de la grille du parent au pas double) ne soit ecrete. Expose pour que
+// les tests verifient qu'ils couvrent bien les deux chemins.
+bool terrainNodeUsesFastPath(const Heightmap& heightmap, const TerrainQuadtree& quadtree,
+                             uint32_t nodeIndex);
 
 } // namespace vercora

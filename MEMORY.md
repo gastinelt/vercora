@@ -5,8 +5,10 @@ voir `NOTES-PHASE6.md`, `NOTES-PHASE7.md`, `NOTES-PHASE9.md`, `NOTES-PHASE10.md`
 `NOTES-PHASE11.md`, `NOTES-PHASE12.md`, `NOTES-PHASE-VELO.md`,
 `NOTES-PHASE-ESCALADE.md`, `NOTES-PHASE15.md`, `NOTES-PHASE16.md`,
 `NOTES-PHASE17.md`, `NOTES-PHASE18.md`, `NOTES-PHASE19.md`,
-`NOTES-PHASE20.md` et `NOTES-PHASE21.md` ; ce fichier est
+`NOTES-PHASE20.md` a `NOTES-PHASE32.md` (plus `NOTES-PHASE28-DESIGN.md`,
+`NOTES-PHASE29-DESIGN.md`) et l'audit `NOTES-AUDIT-GLOBAL.md` ; ce fichier est
 un resume vivant, mis a jour a la fin de chaque session, pas un journal complet.
+Le `README.md` a la racine donne le demarrage rapide (build, lancement, tests).
 
 ## Ce qu'est Vercora
 
@@ -21,6 +23,35 @@ simplifie, chiffre et teste - mais plus aucune n'est vide.
 MONDE - une partie normale les charge, les dessine et s'y cogne. Suite du
 2026-08-23 : **F3/F4 selectionnent l'objet pose suivant/precedent SANS viser**
 (detail plus bas, section Phase 15).
+
+## Etat verifie (2026-10-15, fin de Phase 32 ; fusion des branches PC et cloud)
+
+Ce bloc complete celui de la Phase 20 ci-dessous, qui reste vrai sauf mention.
+
+- **Builds** : Windows inchange (`tools\build.bat`, `tools\run_logic_tests.bat`).
+  **Linux** depuis la Phase 32 : `cmake -S . -B build-rel -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DGLFW_BUILD_WAYLAND=OFF && ninja -C build-rel`
+  (GCC 13 / Clang 18). Les tests headless se compilent avec la meme liste de
+  sources que `run_logic_tests.bat`.
+- **Tests headless** : 3 963 verifications sans les dalles LiDAR (25 de plus
+  avec elles). +20 en Phase 32 (formats GPU, allocateur, orthophoto par tranches).
+- **Ressources** : chaque partie journalise `Ressources (PHASE 32)` au
+  chargement, toutes les 10 s et a la fermeture : RAM du processus, memoire GPU
+  exacte (toute allocation passe par `VulkanContext::allocateMemory`), blocs et
+  appels `vkAllocateMemory`, et occupation du pool de geometrie.
+- **Format GPU** : `Vertex` (68 o) n'est plus que le format CPU ; le GPU lit
+  `ObjectVertex` (44 o) et `TerrainVertex` (16 o), dans les blocs de 4 Mo de
+  `GpuBufferPool`. Ecriture directe en memoire unifiee (UHD 770), staging sinon
+  (`--force-staging` pour l'eprouver).
+- **Options ajoutees** : `--quit-after=S`, `--freeze-anim`, `--force-staging`,
+  `--vsync` (presentation FIFO, a prendre pour JOUER ; les mesures restent non
+  plafonnees).
+- **Validation de synchronisation** : la variable qui fonctionne avec les couches
+  1.3.275 est `VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT`.
+- **Sans GPU ni donnees** (session cloud) : lavapipe + Xvfb, zone proxy par
+  `tools/make_bench_zone.py`. Recette complete : NOTES-PHASE32.md section 9.
+- **Comparaisons d'images** : ajouter `--no-wildlife` (la faune bouge en temps
+  reel) en plus de `--lock-input --look --time-scale=0 --freeze-anim`.
 
 ## Etat verifie (2026-08-26, fin de Phase 20)
 
@@ -1675,7 +1706,10 @@ Deux points rouges, aucun imputable a la phase :
    collision, catalogue, placement et serialisation sont deja agnostiques du
    format. Compter un analyseur JSON, le conteneur `.glb`, les accesseurs et
    l'aplatissement de la hierarchie de noeuds.
-0bis. **Paralleliser la construction des tuiles** (Phase 18) : c'est 83 % du
+0bis. (Phase 32 : une tuile interieure se construit desormais sans relecture -
+   ~104 us en Release lavapipe - et s'ecrit directement en memoire GPU, sans
+   MeshData ni copie : le gain a attendre du parallelisme a encore baisse.)
+   **Paralleliser la construction des tuiles** (Phase 18) : c'est 83 % du
    cout d'une tuile apres les optimisations exactes de cette phase, et
    `terrainNodeMeshData` est deja PURE. Le seul obstacle est
    `Renderer::addMesh`, qui doit rester sur le thread de rendu.
@@ -1686,7 +1720,10 @@ Deux points rouges, aucun imputable a la phase :
 3. ~~Transfert asynchrone des tuiles de terrain.~~ **FAIT EN PHASE 12.** Le
    verrou suivant est le **maillage CPU d'une tuile**, toujours synchrone sur le
    thread de rendu : un thread de maillage dedie est la suite logique.
-4. **Index buffer partage** entre toutes les tuiles, et **sommet allege** (delta
+4. ~~**Index buffer partage** et **sommet allege**~~ **FAITS EN PHASE 32**
+   (topologie uint16 unique, TerrainVertex de 16 o). Suite possible : tirer
+   les altitudes d'un SSBO (16 -> ~4,5 o/sommet), voir NOTES-PHASE32.md.
+   Texte d'origine : **Index buffer partage** entre toutes les tuiles, et **sommet allege** (delta
    de morphing plutot que position complete) : deux economies faciles, chiffrees
    dans NOTES-PHASE10.md. Le partage de l'index buffer economiserait aussi
    98 Ko par tuile epinglee.
@@ -2686,3 +2723,41 @@ Tests **3807/3807** (3636 avant), 0 `[Validation]` au demarrage.
 - Demo : `dist\VercoraDemo-candidate(.zip)` = 110,7 Mio, avec les 4 cartes de couvert et
   `precip.*.spv` ; teste depuis I: et OK. `dist\VercoraDemo` NON remplace (decision
   utilisateur). `deploy_beta_to_desktop.ps1` est a revoir.
+## PHASE 32 (2026-10-13/14) - optimisation des ressources (detail : NOTES-PHASE32.md)
+
+Session cloud (Linux, sans GPU ni donnees LiDAR) : mesure sous **lavapipe +
+Xvfb** (rendu logiciel DETERMINISTE : deux runs identiques = 0 pixel
+d'ecart, donc preuves au bit pres possibles) sur une **zone proxy** a la
+vraie echelle (`tools/make_bench_zone.py` : relief fBm 5001 x 5001, georef
+et altitudes de la vraie zone, couvert tire de l'orthophoto versionnee).
+Les chiffres sont comparables avant/apres, PAS a ceux de l'UHD 770.
+
+- **Build Linux** : GCC 13 / Clang 18 (`= {}` sur struct imbriquee ->
+  surcharges, CWG 1397 ; `GLFW_INCLUDE_NONE`). `cmake -G Ninja
+  -DGLFW_BUILD_WAYLAND=OFF`. Tests 3 963 / 3 963 (+20).
+- **Instrumentation** : toute memoire GPU via `VulkanContext::allocateMemory`
+  (comptee), RAM via `core/ProcessMemory`, ligne `Ressources (PHASE 32)` au
+  chargement / toutes les 10 s / en fin de partie. Options `--quit-after=S`,
+  `--freeze-anim`, `--force-staging`, `--vsync`.
+- **Geometrie** : `Vertex` (68 o) reste le format CPU ; GPU = `ObjectVertex`
+  44 o (exact) et `TerrainVertex` 16 o (x/z/UV/morph recalcules par
+  terrain.vert depuis `gl_VertexIndex` + `DrawItem::grid`, `precise`).
+  Topologie des tuiles partagee en uint16. `GpuBufferPool` (blocs 4 Mo) :
+  ecriture DIRECTE en memoire unifiee, staging + barriere VERTEX_INPUT ->
+  TRANSFER sinon. Tuiles interieures construites sans relecture (bit a bit).
+- **Rendu** : terrain dessine en DERNIER (early-Z) + culling de ses faces
+  arriere. Orthophoto lue par tranches dans un staging de 4 Mo reutilise.
+- **Bilan survol 900 m/s** : pic GPU 285 -> 87 Mo, terrain 188 -> 33 Mo,
+  vkAllocateMemory ~17 000 -> 22, streaming 4,3 -> 0,93 ms/image.
+  Foret : pic GPU 103 -> 56 Mo, +44 % d'images/s (lavapipe). Chargement :
+  pic RAM -68 Mo, pic GPU 89 -> 50 Mo.
+- **Image** : quantification des normales (+/- 1 niveau sur ~0,04 % des
+  pixels), egalites de profondeur aux pieds des brins/troncs (24 px), et
+  ~250 px isoles sur parois rasantes (culling). Staging, parallele, ortho,
+  tuiles rapides : identiques au bit pres a ce qu'ils remplacent.
+- **Validation** : 0 message (standard ET synchronisation, chemins direct et
+  staging). Controle negatif : sans la barriere, 414 SYNC-HAZARD en survol.
+- **PIEGE** pour les comparaisons d'images : la FAUNE bouge en temps reel ;
+  comparer avec `--no-wildlife`, sinon un animal deplace fait 6-11 pixels.
+- **A faire sur la machine de dev** : re-mesurer en Release sur l'UHD 770
+  (profile_phase27/29.ps1, run_vulkan_check.ps1 complet).

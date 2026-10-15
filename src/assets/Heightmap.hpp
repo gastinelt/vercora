@@ -95,7 +95,14 @@ public:
     // Genere immediatement la grille par bruit fractal. Lance
     // std::runtime_error si les parametres ne peuvent pas produire une surface
     // (resolution < 2, taille <= 0, ...).
-    explicit Heightmap(const Params& params = {});
+    explicit Heightmap(const Params& params);
+
+    // Memes parametres par defaut. Une SURCHARGE plutot qu'un argument par
+    // defaut `= {}` : GCC et Clang refusent de construire une struct IMBRIQUEE
+    // dotee d'initialiseurs de membres dans un argument par defaut de la classe
+    // englobante (CWG 1397), la ou MSVC l'accepte. Le corps d'une fonction
+    // membre, lui, voit la classe complete : la delegation compile partout.
+    explicit Heightmap() : Heightmap(Params{}) {}
 
     // Adopte une grille DEJA CONSTRUITE, sans rien generer : c'est par ici
     // qu'entrent les donnees LiDAR (voir assets/TerrainFile.hpp).
@@ -153,6 +160,12 @@ public:
     // Altitude d'un echantillon de la grille. Les indices sont ecretes dans
     // [0, resolution-1] : appeler avec ix = -1 renvoie la colonne 0.
     float at(int64_t ix, int64_t iz) const;
+
+    // PHASE 32. La grille brute, [iz * resolution + ix], en lecture seule. Pour
+    // les boucles chaudes qui ont DEJA etabli que leurs indices sont dans la
+    // grille et n'ont donc que faire de l'ecretage de at() - la construction
+    // des tuiles interieures du quadtree (renderer/TerrainNodeMesh.cpp).
+    const float* rawHeights() const { return heights_.data(); }
 
     // Position monde d'un echantillon (le long de X pour ix, de Z pour iz).
     float worldCoord(uint32_t index) const;

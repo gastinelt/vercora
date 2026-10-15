@@ -3,6 +3,7 @@
 #include "core/Frustum.hpp"
 #include "renderer/DrawItem.hpp"
 #include "renderer/MeshData.hpp"
+#include "renderer/Renderer.hpp" // Renderer::TerrainMeshWrite
 #include "world/TerrainQuadtree.hpp"
 
 #include <glm/glm.hpp>
@@ -16,7 +17,6 @@
 namespace vercora {
 
 class Heightmap;
-class Renderer;
 
 // Fait le lien entre le quadtree (qui decide QUOI dessiner) et le Renderer (qui
 // possede les geometries GPU) : cache de tuiles residentes, construction a la
@@ -36,10 +36,12 @@ class Renderer;
 //     recopier). Il est passe de 4 a 64 pour cette raison. Les tuiles au-dela du
 //     budget sont servies dans les frames suivantes, les plus PROCHES d'abord.
 //
-//  2. PLAFOND DE RESIDENCE (maxResidentNodes). Chaque tuile consomme deux
-//     allocations Vulkan (vertex + index), et vkAllocateMemory est plafonne par
-//     maxMemoryAllocationCount (typiquement 4096). Le plafond garde une marge
-//     confortable en plus de borner la RAM.
+//  2. PLAFOND DE RESIDENCE (maxResidentNodes). Il bornait a l'origine deux
+//     choses : la memoire, et le nombre d'allocations Vulkan (deux par tuile,
+//     plafonnees par maxMemoryAllocationCount, typiquement 4096). PHASE 32 :
+//     les tuiles vivent dans les blocs partages du GpuBufferPool, une tuile ne
+//     coute plus d'allocation - le plafond ne borne plus que la memoire, a
+//     68 Ko par tuile au lieu de 385.
 //
 //  3. EVICTION LRU, jamais sur une tuile utilisee dans la frame courante, ni
 //     sur une tuile du sommet epingle (point 4).
@@ -87,8 +89,9 @@ public:
         // staging vivant simultanement (64 tuiles ~ 25 Mo).
         uint32_t maxUploadsPerFrame = 64;
 
-        // Plafond de tuiles gardees sur le GPU. 512 tuiles = 1024 allocations
-        // Vulkan et ~200 Mo au format de sommet de la Phase 10.
+        // Plafond de tuiles gardees sur le GPU. 512 tuiles = ~200 Mo au format
+        // de sommet de la Phase 10, ~35 Mo depuis la Phase 32 (sommet de 16
+        // octets, topologie partagee), en une dizaine de blocs de 4 Mo.
         uint32_t maxResidentNodes = 512;
 
         // Frames pendant lesquelles le budget par frame est LEVE, au demarrage :
@@ -176,7 +179,11 @@ public:
     // Ni la Heightmap ni le Renderer ne sont possedes ; les deux doivent vivre
     // plus longtemps que le streamer.
     TerrainStreamer(const Heightmap& heightmap, Renderer& renderer,
-                    const Params& params = {});
+                    const Params& params);
+    // Parametres par defaut : surcharge et non `= {}`, voir Heightmap() (refus
+    // de GCC/Clang, CWG 1397).
+    TerrainStreamer(const Heightmap& heightmap, Renderer& renderer)
+        : TerrainStreamer(heightmap, renderer, Params{}) {}
     ~TerrainStreamer();
 
     TerrainStreamer(const TerrainStreamer&) = delete;
@@ -241,33 +248,34 @@ private:
         bool pinned = false;
     };
 
-    // PHASE 19. Maille les tuiles `nodes` dans `batchMeshes_`, en parallele
-    // au-dela de deux tuiles. AUCUN appel Vulkan : c'est toute la raison pour
-    // laquelle cette etape peut quitter le thread de rendu sans rien changer a
-    // la synchronisation du moteur.
+    // PHASE 19. Construit les tuiles `nodes` dans `batchMeshes_`, le maillage
+    // en parallele au-dela de deux tuiles. PHASE 32 : les emplacements sont
+    // reserves d'abord sur le thread de rendu (Renderer::beginTerrainMesh), les
+    // threads y ECRIVENT les sommets - sans le moindre appel Vulkan, c'est
+    // toute la raison pour laquelle cette etape peut quitter le thread de
+    // rendu - puis le thread de rendu les livre (endTerrainMesh).
     //
-    // Chaque thread ecrit dans des ELEMENTS DISJOINTS de vecteurs deja
-    // dimensionnes : il n'y a ni verrou, ni file, ni compteur partage - donc
-    // aucun etat sur lequel une course serait possible. Une tuile qui echoue
-    // depose son message dans `batchErrors_[k]`, jamais dans un journal (les
-    // fonctions de journalisation ne sont pas prevues pour plusieurs threads) :
-    // c'est l'appelant qui journalise, apres la jonction.
+    // Chaque thread ecrit dans des ZONES DISJOINTES deja reservees : il n'y a
+    // ni verrou, ni file, ni compteur partage - donc aucun etat sur lequel une
+    // course serait possible. Une tuile qui echoue depose son message dans
+    // `batchErrors_[k]`, jamais dans un journal (les fonctions de
+    // journalisation ne sont pas prevues pour plusieurs threads) : c'est
+    // l'appelant qui journalise, apres la jonction.
     void meshBatch(const std::vector<uint32_t>& nodes);
 
     // true si un lot de `count` tuiles vaut la peine de partir sur des threads.
     bool wantsParallel(std::size_t count) const;
 
-    // Pose la topologie commune puis televerse. SEQUENTIEL, thread de rendu.
-    // Renvoie kInvalidMesh en cas d'echec (la tuile est alors simplement
-    // sautee : un trou d'une frame vaut mieux qu'un arret du jeu).
-    MeshHandle uploadNode(uint32_t nodeIndex, MeshData& data);
-
-    // Maille ET televerse une tuile, en sequence, sans jamais garder plus d'un
-    // MeshData en vie. Chemin par DEFAUT depuis que meshThreads vaut 1, et
-    // chemin du sommet epingle.
+    // PHASE 32. Construit une tuile : reserve sa place dans le pool de
+    // geometrie (Renderer::beginTerrainMesh), y ECRIT ses sommets au format
+    // compact, la livre. SEQUENTIEL, thread de rendu. Chemin par DEFAUT depuis
+    // que meshThreads vaut 1, et chemin du sommet epingle. Renvoie kInvalidMesh
+    // en cas d'echec (la tuile est alors simplement sautee : un trou d'une
+    // frame vaut mieux qu'un arret du jeu).
     MeshHandle buildNode(uint32_t nodeIndex);
 
-    // PHASE 18 : la topologie d'une tuile, commune a toutes.
+    // PHASE 18 : la topologie d'une tuile, commune a toutes. PHASE 32 : elle
+    // n'est plus recopiee par tuile mais televersee UNE fois (sharedIndexSet_).
     const std::vector<uint32_t>& sharedIndices() const;
 
     // Libere la tuile la moins recemment utilisee qui n'a pas servi dans la
@@ -337,12 +345,16 @@ private:
     // locales, uniquement pour garder leur capacite d'une frame a l'autre -
     // meme raison que selection_ et fallbackAncestors_.
     std::vector<uint32_t>    batchNodes_;
-    std::vector<MeshData>    batchMeshes_;   // rempli seulement sur le chemin parallele
     std::vector<std::string> batchErrors_;
+    // PHASE 32 : emplacements reserves par le chemin parallele, ou les threads
+    // ecrivent directement (plus aucun MeshData de 287 Ko par tuile du lot).
+    std::vector<Renderer::TerrainMeshWrite> batchWrites_;
+    std::vector<MeshHandle> batchMeshes_;
 
-    // Maillage de travail du chemin sequentiel. Membre pour garder sa capacite
-    // d'une tuile a l'autre ; il n'en vit jamais qu'un.
-    MeshData scratchMesh_;
+    // PHASE 32 : la topologie commune, televersee une fois (Renderer::
+    // addSharedIndices), et la taille GPU d'une tuile (ses sommets seuls).
+    uint32_t sharedIndexSet_ = 0;
+    std::size_t bytesPerNode_ = 0;
 
     // PHASE 19 : temps de MUR de l'etape de maillage, a comparer a
     // geometryMicros_ qui reste, lui, la somme du travail par tuile. Les deux

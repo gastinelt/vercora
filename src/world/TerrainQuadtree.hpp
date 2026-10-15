@@ -127,7 +127,10 @@ public:
     // pour le rendu que pour la COLLISION (voir la note de decouplage dans
     // MEMORY.md). L'arbre n'en garde que des bornes.
     // Lance std::runtime_error si les parametres sont inexploitables.
-    TerrainQuadtree(const Heightmap& heightmap, const Params& params = {});
+    TerrainQuadtree(const Heightmap& heightmap, const Params& params);
+    // Parametres par defaut : surcharge et non `= {}`, voir Heightmap() (refus
+    // de GCC/Clang, CWG 1397).
+    TerrainQuadtree(const Heightmap& heightmap) : TerrainQuadtree(heightmap, Params{}) {}
 
     // Remplit `out` avec les noeuds a dessiner, tries du plus proche au plus
     // lointain. `out` est vide au prealable ; sa capacite est conservee.

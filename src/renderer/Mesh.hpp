@@ -1,55 +1,50 @@
 #pragma once
 
+#include "renderer/GpuBufferPool.hpp"
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
-#include <memory>
 
 namespace vercora {
 
-class VulkanContext;
-class VulkanBuffer;
-class BufferUploader;
-struct MeshData;
+// PHASE 32. Format des sommets d'un maillage, tel que son pipeline les lit
+// (voir renderer/GpuVertex.hpp). Un maillage de terrain ne peut etre dessine
+// qu'avec Material::Terrain, un maillage d'objet qu'avec les autres : le
+// Renderer ecarte tout DrawItem qui melangerait les deux, plutot que de laisser
+// le GPU lire 16 octets la ou il en attend 44.
+enum class VertexLayout : uint8_t {
+    Object,  // ObjectVertex, 44 octets
+    Terrain, // TerrainVertex, 16 octets
+};
 
-// Un mesh pret a etre dessine : vertex buffer + index buffer device-local et
-// leurs compteurs. Interchangeable par construction : le Renderer ne sait pas
-// d'ou vient la geometrie (fichier .obj, cube code en dur, terrain genere plus
-// tard), il recoit un Mesh et l'affiche.
+// Un maillage pret a etre dessine : une plage de sommets et une plage d'indices
+// dans les blocs partages du GpuBufferPool, et leurs compteurs.
 //
-// L'upload passe par VulkanBuffer (staging host-visible -> device-local), le
-// meme chemin que la Phase 1, factorise ici en une seule fonction.
+// PHASE 32 : un Mesh ne possede PLUS de buffer Vulkan. Il possede des PLAGES,
+// rendues au pool a sa destruction - laquelle est toujours differee par le
+// Renderer de kMaxFramesInFlight + 1 images, exactement comme l'etaient les
+// buffers jusqu'ici (voir Renderer::removeMesh). La topologie peut aussi etre
+// PARTAGEE (les tuiles de terrain en ont une seule pour toutes) : le Mesh ne la
+// rend alors pas, c'est le Renderer qui la possede.
 //
-// PHASE 12 : cet upload n'ATTEND PLUS le GPU. La copie est confiee a un
-// BufferUploader (le Renderer), qui l'enregistre en tete du command buffer de la
-// frame suivante ; le constructeur revient des que la geometrie a ete recopiee
-// dans un buffer staging, sans aucune synchronisation. Consequence a garder en
-// tete : les buffers du Mesh ne contiennent la geometrie qu'a partir de
-// l'execution de cette frame - c'est-a-dire avant tout draw qui pourrait les
-// lire, puisque la copie est enregistree AVANT le render pass et separee de lui
-// par une barriere.
+// Le televersement (conversion des sommets, ecriture directe ou staging) est
+// fait par le Renderer avant de construire le Mesh : cette classe ne fait que
+// decrire et dessiner.
 class Mesh {
 public:
-    // `uploader` recoit les copies staging -> device-local. Il doit vivre plus
-    // longtemps que la frame en cours (en pratique c'est le Renderer lui-meme).
-    // Lance std::runtime_error si la geometrie est vide ou incoherente.
-    // `log` a false pour les geometries creees en masse (les tuiles du quadtree
-    // de la Phase 10) : une ligne de journal par tuile noierait toute autre
-    // information et couterait plus cher que l'upload lui-meme.
-    Mesh(VulkanContext& context,
-         BufferUploader& uploader,
-         const MeshData& data,
-         bool log = true);
+    Mesh(GpuBufferPool& pool, VertexLayout layout,
+         const GpuRange& vertices, uint32_t vertexCount,
+         const GpuRange& indices, VkIndexType indexType, uint32_t indexCount,
+         bool ownsIndices);
     ~Mesh();
 
     Mesh(const Mesh&) = delete;
     Mesh& operator=(const Mesh&) = delete;
 
-    // Lie les buffers du mesh au command buffer courant.
-    void bind(VkCommandBuffer commandBuffer) const;
-
-    // Emet le draw indexe. A appeler apres bind() et apres avoir lie les
-    // descriptor sets / le pipeline.
+    // Emet le draw indexe. A appeler apres avoir lie les plages du maillage
+    // (Renderer::recordCommandBuffer, qui evite les liaisons redondantes), les
+    // descriptor sets et le pipeline.
     void draw(VkCommandBuffer commandBuffer) const;
 
     // PHASE 11 : meme dessin, repete `instanceCount` fois. Les instances lisent
@@ -60,22 +55,27 @@ public:
 
     uint32_t vertexCount() const { return vertexCount_; }
     uint32_t indexCount() const  { return indexCount_; }
+    VertexLayout layout() const  { return layout_; }
+
+    const GpuRange& vertexRange() const { return vertices_; }
+    const GpuRange& indexRange() const  { return indices_; }
+    VkIndexType indexType() const       { return indexType_; }
+
+    // Octets de geometrie PROPRES a ce maillage (la topologie partagee n'est
+    // pas comptee : elle n'existe qu'une fois).
+    VkDeviceSize ownedBytes() const {
+        return vertices_.size + (ownsIndices_ ? indices_.size : 0);
+    }
 
 private:
-    // Cree un buffer device-local et CONFIE a l'uploader la copie depuis un
-    // staging temporaire. Commun au vertex buffer et a l'index buffer.
-    static std::unique_ptr<VulkanBuffer> createDeviceLocalBuffer(
-        VulkanContext& context,
-        BufferUploader& uploader,
-        const void* data,
-        VkDeviceSize size,
-        VkBufferUsageFlags usage);
-
-    std::unique_ptr<VulkanBuffer> vertexBuffer_;
-    std::unique_ptr<VulkanBuffer> indexBuffer_;
-
+    GpuBufferPool& pool_;
+    VertexLayout layout_ = VertexLayout::Object;
+    GpuRange vertices_;
+    GpuRange indices_;
+    VkIndexType indexType_ = VK_INDEX_TYPE_UINT32;
     uint32_t vertexCount_ = 0;
     uint32_t indexCount_ = 0;
+    bool ownsIndices_ = true;
 };
 
 } // namespace vercora
