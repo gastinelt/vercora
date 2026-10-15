@@ -116,3 +116,17 @@ Le projet Vercora est sur des fondations techniques saines, stables et vérifié
 3. **Écosystème Faune & Flore :**
    - Comportements étendus de la faune (troupeaux, pâturage, cycles repos/déplacement selon l'heure météo).
    - Cueillette de baies / champignons selon l'humidité et le couvert forestier.
+
+---
+
+## Suite donnee (Phase 32, 2026-10-13)
+
+L'optimisation des ressources de `NOTES-PHASE32.md` reprend ce rapport :
+- **D6** (heightmap entiere en RAM) : examine et CONSERVE - c'est la verite
+  physique, et ses altitudes ne se codent pas sans perte sur 16 bits.
+- Les postes que cet audit ne chiffrait pas (format de sommet de 68 o,
+  topologie recopiee par tuile, une allocation Vulkan par buffer, staging en
+  memoire unifiee) sont traites : pic GPU du survol 285 -> 87 Mo,
+  ~17 000 -> 22 `vkAllocateMemory` en 30 s.
+- Le projet compile aussi sous Linux (GCC, Clang) et se mesure sans GPU
+  (lavapipe), voir `README.md`.

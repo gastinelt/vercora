@@ -57,7 +57,7 @@ double TextureData::metresPerTexel() const {
     return 0.5 * (perX + perY);
 }
 
-TextureData loadTextureFile(const std::string& path) {
+TextureData loadTextureFileHeader(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         throw std::runtime_error("Texture : fichier introuvable ou illisible : " + path);
@@ -148,19 +148,41 @@ TextureData loadTextureFile(const std::string& path) {
             ". Fichier tronque ou en-tete incoherent.");
     }
 
-    file.seekg(static_cast<std::streamoff>(kHeaderSize), std::ios::beg);
-    texture.pixels.resize(static_cast<std::size_t>(total));
-    if (!file.read(reinterpret_cast<char*>(texture.pixels.data()),
-                   static_cast<std::streamsize>(total))) {
-        throw std::runtime_error("Texture : lecture interrompue dans " + path + ".");
-    }
-
     logInfo("Texture : " + texture.label + " " + std::to_string(texture.width) + "x" +
             std::to_string(texture.height) + ", " + std::to_string(mipLevels) +
             " mipmaps, " +
             (texture.format == TextureFormat::BC1 ? std::string("BC1") : std::string("RGBA8")) +
             ", " + std::to_string(total / (1024 * 1024)) + " Mo.");
 
+    return texture;
+}
+
+void readTexturePayload(std::istream& file, uint64_t offset, uint64_t bytes,
+                        void* destination) {
+    file.seekg(static_cast<std::streamoff>(kHeaderSize + offset), std::ios::beg);
+    if (!file.read(static_cast<char*>(destination), static_cast<std::streamsize>(bytes))) {
+        throw std::runtime_error("Texture : lecture interrompue (" + std::to_string(bytes) +
+                                 " octets a l'offset " + std::to_string(offset) + ").");
+    }
+}
+
+void readTexturePayload(const std::string& path, const TextureData& header,
+                        void* destination) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("Texture : fichier introuvable ou illisible : " + path);
+    }
+    try {
+        readTexturePayload(file, 0, header.payloadSize(), destination);
+    } catch (const std::exception&) {
+        throw std::runtime_error("Texture : lecture interrompue dans " + path + ".");
+    }
+}
+
+TextureData loadTextureFile(const std::string& path) {
+    TextureData texture = loadTextureFileHeader(path);
+    texture.pixels.resize(static_cast<std::size_t>(texture.payloadSize()));
+    readTexturePayload(path, texture, texture.pixels.data());
     return texture;
 }
 

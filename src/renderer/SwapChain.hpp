@@ -1,5 +1,7 @@
 #pragma once
 
+#include "renderer/VulkanContext.hpp" // GpuAllocation
+
 #include <vulkan/vulkan.h>
 
 #include <vector>
@@ -15,7 +17,9 @@ class Window;
 // pas), ce qui evite d'invalider le pipeline graphique.
 class SwapChain {
 public:
-    SwapChain(VulkanContext& context, Window& window);
+    // `vsync` (PHASE 32) : presentation calee sur l'ecran (FIFO) au lieu du
+    // mode non plafonne des mesures. Voir choosePresentMode.
+    SwapChain(VulkanContext& context, Window& window, bool vsync = false);
     ~SwapChain();
 
     SwapChain(const SwapChain&) = delete;
@@ -59,6 +63,7 @@ private:
 
     // MAX_ENUM = "pas encore choisi", pour que le premier choix soit toujours logge.
     VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_MAX_ENUM_KHR;
+    bool vsync_ = false;
 
     std::vector<VkImage>       images_;
     std::vector<VkImageView>   imageViews_;
@@ -68,7 +73,7 @@ private:
     // par le render pass). Recree en meme temps que la swapchain au resize.
     VkFormat       depthFormat_ = VK_FORMAT_UNDEFINED;
     VkImage        depthImage_ = VK_NULL_HANDLE;
-    VkDeviceMemory depthImageMemory_ = VK_NULL_HANDLE;
+    GpuAllocation  depthAllocation_;
     VkImageView    depthImageView_ = VK_NULL_HANDLE;
 
     VkRenderPass renderPass_ = VK_NULL_HANDLE;

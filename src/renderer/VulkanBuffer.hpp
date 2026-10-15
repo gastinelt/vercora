@@ -1,5 +1,7 @@
 #pragma once
 
+#include "renderer/VulkanContext.hpp" // GpuAllocation
+
 #include <vulkan/vulkan.h>
 
 #include <memory>
@@ -31,10 +33,12 @@ public:
     virtual ~BufferUploader() = default;
 
     // Enregistre une copie de `staging` (integralite de sa taille) vers
-    // `destination`. Prend possession de `staging`, qui sera detruit quand la
-    // frame ayant execute la copie sera terminee.
+    // `destination`, a partir de l'octet `destinationOffset` (PHASE 32 : la
+    // destination est une PLAGE d'un bloc partage, voir GpuBufferPool). Prend
+    // possession de `staging`, qui sera detruit quand la frame ayant execute la
+    // copie sera terminee.
     virtual void enqueueCopy(std::unique_ptr<VulkanBuffer> staging,
-                             VkBuffer destination) = 0;
+                             VkBuffer destination, VkDeviceSize destinationOffset) = 0;
 };
 
 // Buffer Vulkan reutilisable : creation, allocation memoire, bind, map,
@@ -76,7 +80,7 @@ private:
     VulkanContext& context_;
     VkDeviceSize   size_ = 0;
     VkBuffer       buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory memory_ = VK_NULL_HANDLE;
+    GpuAllocation  allocation_;
     void*          mapped_ = nullptr;
 };
 

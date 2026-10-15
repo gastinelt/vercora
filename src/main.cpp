@@ -11,6 +11,7 @@
 #include "editor/AssetCatalog.hpp"
 #include "editor/EditorController.hpp"
 #include "core/Paths.hpp"
+#include "core/ProcessMemory.hpp"
 #include "editor/EditorScene.hpp"
 #include "editor/PlacedObject.hpp"
 #include "editor/SceneFile.hpp"
@@ -136,6 +137,20 @@ namespace {
 // graphique, sa liste d'assets et son etat s'affichent dans le journal. Les
 // objets poses, eux, font partie du monde et sont affiches et solides dans le
 // jeu normal - c'est justement le point.
+//
+// Plus deux options de la Phase 32, pour le BANC DE MESURE (voir NOTES-PHASE32.md) :
+//   vercora.exe [scene] --quit-after=S       -> fermeture propre apres S secondes
+//                                               de boucle, bilans de fin compris
+//   vercora.exe [scene] --freeze-anim        -> horloge d'animation des shaders
+//                                               figee : images comparables au
+//                                               pixel pres d'un run a l'autre
+//   vercora.exe [scene] --force-staging      -> geometrie televersee par staging
+//                                               meme en memoire unifiee (chemin
+//                                               d'un GPU discret, a eprouver)
+//   vercora.exe [scene] --vsync              -> presentation calee sur l'ecran
+//                                               (FIFO) : la cadence ne depasse
+//                                               plus le rafraichissement, CPU et
+//                                               GPU dorment le reste du temps
 //
 // Le terrain synthetique n'est PAS supprime, et pour deux raisons distinctes :
 // il reste la scene de reference des tests (monde deterministe, arbres a
@@ -873,6 +888,27 @@ int main(int argc, char** argv) {
         std::string sceneFileArgument;
         std::string editorAssetsArgument;
         std::string sceneArgument;
+        // PHASE 32 : outils de BANC DE MESURE.
+        //   --quit-after=S  ferme proprement le jeu apres S secondes de boucle,
+        //                   comme une fermeture de fenetre : tous les bilans de
+        //                   fin de partie sont ecrits. Remplace le WM_CLOSE poste
+        //                   de l'exterieur, que la Phase 26 a vu arriver en retard
+        //                   sur une machine chargee.
+        //   --freeze-anim   fige l'horloge d'ANIMATION des shaders (ondulation
+        //                   de l'herbe, chute de la pluie) a zero. Avec
+        //                   --lock-input, --look et --time-scale=0, deux images
+        //                   d'une meme scene deviennent comparables au pixel pres,
+        //                   ce qui est la condition pour prouver qu'une
+        //                   optimisation ne change pas l'image.
+        float quitAfterSeconds = 0.0f;
+        bool freezeAnimation = false;
+        // PHASE 32 : --force-staging televerse la geometrie par staging meme en
+        // memoire unifiee (le chemin d'un GPU discret), pour l'eprouver ici.
+        bool forceStaging = false;
+        // PHASE 32 : --vsync, presentation FIFO calee sur l'ecran. Le reglage a
+        // prendre pour JOUER (consommation, chauffe, pas de dechirure) ; les
+        // mesures gardent le defaut non plafonne.
+        bool vsync = false;
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--dump-world") {
@@ -1029,6 +1065,24 @@ int main(int argc, char** argv) {
                 }
             } else if (argument.rfind("--ortho=", 0) == 0) {
                 orthoArgument = argument.substr(std::strlen("--ortho="));
+            } else if (argument.rfind("--quit-after=", 0) == 0) {
+                try {
+                    quitAfterSeconds =
+                        std::stof(argument.substr(std::strlen("--quit-after=")));
+                    if (!(quitAfterSeconds > 0.0f)) {
+                        logWarn("--quit-after attend une duree positive en secondes. Ignore.");
+                        quitAfterSeconds = 0.0f;
+                    }
+                } catch (const std::exception&) {
+                    logWarn("--quit-after : duree illisible. Ignore : " + argument);
+                    quitAfterSeconds = 0.0f;
+                }
+            } else if (argument == "--freeze-anim") {
+                freezeAnimation = true;
+            } else if (argument == "--force-staging") {
+                forceStaging = true;
+            } else if (argument == "--vsync") {
+                vsync = true;
             } else if (argument.rfind("--", 0) == 0) {
                 logWarn("Option inconnue, ignoree : " + argument);
             } else if (sceneArgument.empty()) {
@@ -1163,7 +1217,11 @@ int main(int argc, char** argv) {
         CompositeCollisionSolver worldSolver;
 
         MeshData sceneMesh;
+        // PHASE 32 : le terrain d'un seul bloc (--no-lod) au format GPU compact.
+        TerrainGpuMesh sceneTerrain;
         RenderOptions renderOptions;
+        renderOptions.forceStaging = forceStaging;
+        renderOptions.vsync = vsync;
 
         Inventory inventory;
 
@@ -1183,7 +1241,10 @@ int main(int argc, char** argv) {
             //     produisait 25 M de sommets et 50 M de triangles cote CPU,
             //     recopies ensuite sur le GPU.
             if (!dumpWorldOnly && !useLod) {
-                sceneMesh = terrainMeshData(*heightmap);
+                // PHASE 32 : directement au format GPU du terrain (16 octets par
+                // sommet), sans le MeshData de 68 octets par sommet - 1,7 Go de
+                // moins au pic sur la zone au pas de 1 m.
+                sceneTerrain = terrainGpuMeshData(*heightmap);
             }
 
             renderOptions.heightRange = { heightmap->minHeight(), heightmap->maxHeight() };
@@ -1265,8 +1326,19 @@ int main(int argc, char** argv) {
         // nombre d'instances qui les utiliseront ensuite.
         // Avec le quadtree, il n'y a pas de geometrie de scene unique : chaque
         // tuile est enregistree et liberee par le TerrainStreamer.
-        const MeshHandle sceneMeshHandle =
+        MeshHandle sceneMeshHandle =
             sceneMesh.empty() ? kInvalidMesh : renderer.addMesh(sceneMesh);
+        if (!sceneTerrain.vertices.empty()) {
+            sceneMeshHandle = renderer.addTerrainMesh(sceneTerrain.vertices, sceneTerrain.indices,
+                                                      sceneTerrain.name);
+            sceneTerrain = TerrainGpuMesh{}; // la copie CPU n'a plus de raison d'etre
+        }
+        // PHASE 32 : la grille de la heightmap, dont terrain.vert deduit la
+        // position horizontale et l'UV de chaque sommet de terrain.
+        if (terrainScene) {
+            renderer.setTerrainGrid(heightmap->worldCoord(0), heightmap->spacing(),
+                                    heightmap->resolution() - 1);
+        }
 
         // ------------------------------------------------------------------
         // 2 bis. Orthophoto (Phase 11). Chargee APRES le Renderer, qui possede
@@ -1290,11 +1362,14 @@ int main(int argc, char** argv) {
                         " -i data/ortho -o " + orthoPath);
             } else {
                 try {
-                    const TextureData ortho = loadTextureFile(orthoPath);
+                    // PHASE 32 : l'en-tete seul d'abord (controle d'emprise), puis
+                    // les 42 Mo de texels lus directement dans le staging de la
+                    // texture - jamais tenus en RAM a cote.
+                    const TextureData ortho = loadTextureFileHeader(orthoPath);
                     if (orthoMatchesTerrain(ortho, *heightmap)) {
-                        renderer.setTerrainTexture(ortho);
+                        renderer.setTerrainTextureFromFile(ortho, orthoPath);
                         renderer.setOrthoMix(1.0f);
-                        groundDetailPattern = ortho.metresPerTexel();
+                        groundDetailPattern = static_cast<float>(ortho.metresPerTexel());
                         logInfo("Orthophoto : " +
                                 std::to_string(ortho.metresPerTexel()) +
                                 " m/texel pour un terrain au pas de " +
@@ -2289,8 +2364,27 @@ int main(int argc, char** argv) {
         // fenetre, dont la Phase 18 a montre qu'il varie de ~15 % entre deux
         // runs identiques. Chargement exclu : il precede la boucle.
         const auto loopStart = ProfileClock::now();
+        // PHASE 32 : bilan des ressources une fois le monde charge, avant la
+        // premiere image. Le meme bilan est ecrit toutes les 10 s, puis a la
+        // fermeture avec les pics de la session.
+        logInfo("Ressources apres chargement (PHASE 32) : " + processMemoryLine() + ", " +
+                context.gpuMemoryLine() + ".");
+        double lastResourceLog = 0.0;
         while (!window.shouldClose()) {
             window.pollEvents();
+
+            const double loopSeconds =
+                std::chrono::duration<double>(ProfileClock::now() - loopStart).count();
+            if (quitAfterSeconds > 0.0f && loopSeconds >= quitAfterSeconds) {
+                logInfo("--quit-after : " + std::to_string(quitAfterSeconds) +
+                        " s de boucle ecoulees, fermeture.");
+                break;
+            }
+            if (loopSeconds - lastResourceLog >= 10.0) {
+                lastResourceLog = loopSeconds;
+                logInfo("Ressources (PHASE 32) : " + processMemoryLine() + ", " +
+                        context.gpuMemoryLine() + ". " + renderer.geometryLine() + ".");
+            }
 
             const double now = glfwGetTime();
             const float deltaTime = static_cast<float>(now - lastTime);
@@ -2301,6 +2395,9 @@ int main(int argc, char** argv) {
             // demarrage, donc la valeur reste petite et n'use pas la precision
             // d'un float, contrairement a une horloge absolue.
             const float elapsedSeconds = static_cast<float>(now);
+            // PHASE 32 : horloge des SHADERS seulement (--freeze-anim). La
+            // logique de jeu garde elapsedSeconds.
+            const float animationSeconds = freezeAnimation ? 0.0f : elapsedSeconds;
 
             // --- Bascule du MODE EDITEUR (PHASE 15) ------------------------
             // Traitee AVANT camera.update : entrer en edition change le mode et
@@ -3506,9 +3603,13 @@ int main(int argc, char** argv) {
                     frameProfile.streamingMicros += profileMicros(tf1, tf2);
                 } else if (sceneMeshHandle != kInvalidMesh) {
                     // Terrain d'un seul bloc : sommets deja en coordonnees monde
-                    // -> matrice identite, et pas de bande de morphing.
-                    drawItems.push_back({ sceneMeshHandle, glm::mat4(1.0f),
-                                          Material::Terrain });
+                    // -> matrice identite, et pas de bande de morphing. PHASE 32 :
+                    // une seule "tuile" qui couvre toute la grille au pas 1.
+                    DrawItem terrainItem{ sceneMeshHandle, glm::mat4(1.0f),
+                                          Material::Terrain };
+                    terrainItem.grid = glm::ivec4(0, 0, 1,
+                                                  static_cast<int32_t>(heightmap->resolution()));
+                    drawItems.push_back(terrainItem);
                 }
 
                 for (const Tree& tree : forest->trees()) {
@@ -3682,7 +3783,7 @@ int main(int argc, char** argv) {
                     item.count = static_cast<uint32_t>(instances.size());
                     item.material = Material::Foliage;
                     // Amplitude d'ondulation NULLE : un tronc ne plie pas.
-                    item.params = { 0.0f, elapsedSeconds, 0.0f, 0.0f };
+                    item.params = { 0.0f, animationSeconds, 0.0f, 0.0f };
                     instancedItems.push_back(item);
                 };
                 pushTrees(treeInstances, sceneryTreeMeshHandle);
@@ -3703,7 +3804,7 @@ int main(int argc, char** argv) {
                         // seul materiau qui s'en sert : un arbre pousse 0 et
                         // traverse le meme pipeline, inchange.
                         item.params = { vegetation->params().grassSway,
-                                        elapsedSeconds, 0.0f,
+                                        animationSeconds, 0.0f,
                                         vegetation->params().grassCutout };
                         instancedItems.push_back(item);
                     }
@@ -3734,7 +3835,7 @@ int main(int argc, char** argv) {
                         // pas par un masque - ces plantes sont peu nombreuses,
                         // le budget de sommets n'est pas le sujet.
                         item.params = { 0.35f * vegetation->params().grassSway,
-                                        elapsedSeconds, 0.0f, 0.0f };
+                                        animationSeconds, 0.0f, 0.0f };
                         instancedItems.push_back(item);
                     }
                 }
@@ -3760,7 +3861,7 @@ int main(int argc, char** argv) {
                     item.instances = instances.data();
                     item.count = static_cast<uint32_t>(instances.size());
                     item.material = Material::Foliage;
-                    item.params = { 0.0f, elapsedSeconds, 0.0f, -1.0f };
+                    item.params = { 0.0f, animationSeconds, 0.0f, -1.0f };
                     instancedItems.push_back(item);
                 };
                 pushRocks(boulderInstances, boulderMeshHandle);
@@ -3786,7 +3887,7 @@ int main(int argc, char** argv) {
                     item.instances = instances.data();
                     item.count = static_cast<uint32_t>(instances.size());
                     item.material = Material::Foliage;
-                    item.params = { sway, elapsedSeconds, 0.0f, 0.0f };
+                    item.params = { sway, animationSeconds, 0.0f, 0.0f };
                     instancedItems.push_back(item);
                 };
                 pushBushes(shrubInstances, shrubMeshHandle, 0.04f);
@@ -3846,7 +3947,7 @@ int main(int argc, char** argv) {
                 renderer.setWeatherVisuals(visuals.fogColor, visuals.fogDensityPerMeter,
                                            visuals.precipitation, visuals.snow,
                                            visuals.fallVelocity, visuals.groundDarkening,
-                                           elapsedSeconds);
+                                           animationSeconds);
                 frameProfile.weatherVisualsMicros += profileMicros(tw0, ProfileClock::now());
 
                 // Journal BORNE PAR LE TEMPS (lecon de la Phase 24 : "sur
@@ -3917,6 +4018,12 @@ int main(int argc, char** argv) {
 
         // S'assurer que le GPU a fini avant de detruire quoi que ce soit.
         renderer.waitIdle();
+
+        // PHASE 32 : bilan des ressources, AVANT toute destruction - les chiffres
+        // "vivants" sont donc ceux du jeu en regime etabli, les pics ceux de la
+        // session entiere.
+        logInfo("Ressources en fin de partie (PHASE 32) : " + processMemoryLine() + ", " +
+                context.gpuMemoryLine() + ". " + renderer.geometryLine() + ".");
 
         if (frameProfile.frames > 0) {
             const auto per = [&](uint64_t total) {

@@ -85,6 +85,14 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 precip{0.0f, 0.0f, 0.0f, 0.0f};
     alignas(16) glm::vec4 fall{0.0f, -6.5f, 0.0f, 0.0f};
     alignas(16) glm::vec4 detail{0.0f, 0.0f, 1.0f, 1.0f};
+
+    // PHASE 32. Offset 256. Grille de la heightmap, pour que terrain.vert
+    // recalcule la position horizontale et l'UV d'un sommet a partir de son
+    // indice (voir renderer/GpuVertex.hpp, TerrainVertex) :
+    //   x = origine (Heightmap::worldCoord(0)), y = pas en metres,
+    //   z = nombre de CELLULES par cote (resolution - 1), w = reserve.
+    // Constant sur toute la partie ; seuls les shaders du terrain le declarent.
+    alignas(16) glm::vec4 terrainGrid{0.0f, 1.0f, 1.0f, 0.0f};
 };
 
 } // namespace vercora
