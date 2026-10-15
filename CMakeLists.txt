@@ -19,10 +19,44 @@ endif()
 find_package(Vulkan 1.2 REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Dependances externes via FetchContent (telechargees dans external/)
+# Dependances externes via FetchContent
 # ---------------------------------------------------------------------------
+# PHASE 31 : SOURCES partagees, BINAIRES propres a chaque dossier de build.
+#
+# Jusqu'a la Phase 30, FETCHCONTENT_BASE_DIR valait external/ : les dossiers
+# external/*-build (objets et glfw3.lib) etaient donc PARTAGES par tous les
+# dossiers de build. Un build Release y a reecrit glfw3.lib (/MD) sous le build
+# Debug (/MDd), sans que Ninja le voie (la sortie etait plus recente).
+#
+# Desormais :
+#   - binaires, subbuild et stamps : ${CMAKE_BINARY_DIR}/_deps (un par build) ;
+#   - sources : toujours external/<nom>-src, un cache commun en lecture seule.
+#     tools/run_logic_tests.bat y lit GLM, GLFW et tinyobjloader.
+#
+# Mecanisme : si external/<nom>-src est deja peuple, FETCHCONTENT_SOURCE_DIR_<NOM>
+# y pointe ; FetchContent n'execute alors AUCUNE etape de population (ni
+# telechargement, ni mise a jour), connecte ou non. S'il est absent (clone neuf),
+# SOURCE_DIR fait telecharger les sources a cet endroit, une seule fois.
+# Un FETCHCONTENT_SOURCE_DIR_<NOM> passe en -D par l'utilisateur reste prioritaire.
 include(FetchContent)
-set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external)
+set(FETCHCONTENT_BASE_DIR ${CMAKE_BINARY_DIR}/_deps)
+set(VERCORA_DEPS_SOURCE_CACHE ${CMAKE_CURRENT_SOURCE_DIR}/external)
+
+# vercora_use_cached_source(<nom> <fichier temoin>) : macro (et non fonction)
+# pour que la variable soit posee dans la portee de l'appelant.
+macro(vercora_use_cached_source dep_name marker)
+  string(TOUPPER "${dep_name}" _vercora_dep_upper)
+  if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_${_vercora_dep_upper}
+     AND EXISTS "${VERCORA_DEPS_SOURCE_CACHE}/${dep_name}-src/${marker}")
+    set(FETCHCONTENT_SOURCE_DIR_${_vercora_dep_upper}
+        "${VERCORA_DEPS_SOURCE_CACHE}/${dep_name}-src")
+    message(STATUS "Vercora : ${dep_name} lu depuis le cache de sources ${VERCORA_DEPS_SOURCE_CACHE}/${dep_name}-src")
+  endif()
+endmacro()
+
+vercora_use_cached_source(glfw          CMakeLists.txt)
+vercora_use_cached_source(glm           CMakeLists.txt)
+vercora_use_cached_source(tinyobjloader tiny_obj_loader.h)
 
 # --- GLFW (fenetrage cross-platform) ---
 FetchContent_Declare(
@@ -30,6 +64,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/glfw/glfw.git
   GIT_TAG        3.4
   GIT_SHALLOW    TRUE
+  SOURCE_DIR     ${VERCORA_DEPS_SOURCE_CACHE}/glfw-src
 )
 set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
@@ -43,6 +78,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/g-truc/glm.git
   GIT_TAG        1.0.1
   GIT_SHALLOW    TRUE
+  SOURCE_DIR     ${VERCORA_DEPS_SOURCE_CACHE}/glm-src
 )
 FetchContent_MakeAvailable(glm)
 
@@ -63,6 +99,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
   GIT_TAG        v2.0.0rc13
   GIT_SHALLOW    TRUE
+  SOURCE_DIR     ${VERCORA_DEPS_SOURCE_CACHE}/tinyobjloader-src
   SOURCE_SUBDIR  cmake-volontairement-absent
 )
 FetchContent_MakeAvailable(tinyobjloader)

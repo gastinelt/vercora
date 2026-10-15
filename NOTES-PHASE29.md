@@ -345,3 +345,73 @@ et non 8,4 % / 1,85 / 4,75 / 46 comme dans la section Agent 2 : `Rocks.cpp` date
 ## Non mesure
 Scintillement et apparitions en mouvement ; a-coup du premier semis d'un bloc ; cout
 sous la pluie ; vue de survol. Trainees de rochers a l'oeil (voir 4).
+
+
+# Reprise du 2026-10-11 - prompt Phase 29 relance alors que la phase etait FAITE
+
+Le prompt de cette session decrivait l'etat "Agent 1 termine, aucun code ecrit" et
+attendait 3877 tests. **Faux** : Agents 2, 3 et 4 sont livres depuis le 2026-09-27
+(sections ci-dessus). Decision (session sans supervision) : NE RIEN reecrire, aucun
+fichier de `src/`, `shaders/`, `data/`, `assets/` ni `dist/` modifie ; etat verifie,
+manques comblés par mesure seulement.
+
+## Agent 0 - etat de depart
+- Projet DEPLACE : `_CODE\_Vercora` -> `_CODE\4-vercors\vercora` (rangement du 09/10).
+  `build\CMakeCache.txt` pointe encore vers `_CODE/_Vercora` -> `build\` est PERIME
+  (et `tools\screenshot_scene.ps1` / `run_vulkan_check.ps1` lancent `build\vercora.exe`).
+  Des dossiers vides `_CODE\_Vercora\build` et `external\glfw-build\src` ont ete
+  recrees le 11/10 a 12:08 par quelque chose qui suivait l'ancien chemin.
+- Aucun vercora/find/harnais orphelin au depart. Charge CPU 22 % (CurseForge,
+  Antigravity, navigateur) : machine PAS au repos -> aucune mesure de perf refaite.
+- Build Debug depuis zero dans un dossier NEUF `build-agent0\` (pour ne pas detruire
+  `build\phase29\`) : 86/86, 0 avertissement compilateur (2 avertissements CMake
+  "deprecated" de glm-src, connus).
+- Tests headless : **3968/3968** = 3877 + 53 (rochers) + 38 (buissons). L'ecart avec
+  les 3877 du prompt est exactement la Phase 29.
+
+## Ecarts entre le prompt et l'existant (non corriges, documentes)
+- Temoin buissons : `--no-bushes` (pas `--no-shrubs`).
+- Collision : les gros blocs >= 1,3 m sont SOLIDES (via le solveur composite,
+  decision Agent 2 documentee) ; le prompt demandait "non solides par defaut sauf si
+  trivial" - c'est le cas "trivial" qui a ete retenu.
+- Criteres, rugosite, semis par hachage, trainees, LOD, copie des cartes lowveg
+  (`_canopy_lowveg*`) : conformes.
+
+## --demo : decision
+Dans le code, `--demo` ne coupe ni rochers ni buissons (rendu pur, c'est le propos
+de la demo : regarder le terrain). Decision : **les garder actifs**. MAIS le paquet
+`dist\VercoraDemo\` date du 27/08 (Phase 21) et ne contient que `vercora_zone_1m.vchm`
+et l'ortho : **aucune carte de couvert**, donc dans la demo distribuee (et dans
+`deploy_beta_to_desktop.ps1`, qui copie ces assets) : ZERO rocher, ZERO buisson
+(et rien de ce qui depend du couvert). Pour les y mettre il faut ajouter au paquet
+`vercora_zone_canopy.vchm`, `_canopy_height`, `_canopy_lowveg`, `_canopy_lowveg_height`
+(+ ~16 Mo). NON fait : c'est un changement de ce qui part chez les testeurs.
+
+## Captures aux points demandes - `build\phase29\captures_20261011\`
+Exe `build-agent0`, `--hour=13 --day=12 --time-scale=0 --look=yaw,-20 --lock-input`,
+avant = `--no-rocks --no-bushes`. 0 `[Validation]` sur 15 lancements.
+
+| site | y0 | y90 | y180 | y270 |
+|---|---|---|---|---|
+| pierrier E903578 N6438125 (rug 0,10) | 1,0 % | 0,5 % | 1,1 % | avant manquant (*) |
+| pied de barre E903602 N6438269 (rug 3,38) | 0,0 % | 0,1 % | 0,4 % | 0,0 % |
+
+(*) le script de capture est reste bloque 20 min sans ecrire de ligne CAPTURE alors
+que le jeu repondait et journalisait ; processus tue par PID. Cause non instruite.
+Images `*_diff.png` : pixels changes en rouge.
+
+**Constat** : au pierrier, l'ajout visible se reduit a UN petit arbre et 3-4
+cailloux minuscules gris clair sur calcaire gris clair ; le reste des pixels rouges
+est l'herbe Phase 28 qui ondule (le vent n'est pas gele par --time-scale=0). Au pied
+de barre : rien de visible. Les rochers existent (journal : masque 9,4 %, 1,82 blocs
+/ 4,66 rochers / 23,2 plaques par ha) mais **ne se voient pas aux deux sites que la
+conception avait choisis** : densite faible + teinte proche du calcaire. Pistes (non
+faites) : densite, teinte plus sombre/contrastee, ou blocs plus gros en pied de barre.
+Et ces sites "pierrier" portent de l'herbe dense : pierrier vs pelouse raide, non
+separables au LiDAR (limite Agent 1), se voit ici.
+
+## Toujours non fait / non verifie
+Zone boisee avec lisiere et zone a buissons trouvee par sondage aux points du prompt
+(les captures du 27/09 `buissons_*` et `belvedere_*` couvrent le sujet ailleurs) ;
+perf refaite (machine non au repos) ; suite A-J (inchangee depuis le 27/09, binaire
+identique aux sources) ; scintillement en mouvement.

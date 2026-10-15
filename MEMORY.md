@@ -2650,3 +2650,39 @@ Tests **3807/3807** (3636 avant), 0 `[Validation]` au demarrage.
 - Relecture : seuls main.cpp et foliage.vert modifies ; Forest/Vegetation/faune/
   artisanat/collision/activites identiques octet pour octet ; chemin w >= 0 du shader inchange.
 - Outil : `build-release\` existe desormais (profil Release hors du `build\` Debug).
+
+## PHASE 30 (2026-10-11/12) - rochers visibles (detail : NOTES-PHASE30.md)
+
+- Rochers invisibles en Phase 29 a cause de la TAILLE ANGULAIRE (tache mediane 3 px),
+  pas du contraste (Weber -0,36) ni de la portee. Mesure : sonde sur Rocks.cpp + captures.
+- Plancher de bruit des captures = 0 px SEULEMENT avec `--no-grass --no-wildlife
+  --no-bushes` des deux cotes : l'herbe ondule meme avec `--time-scale=0`.
+- Correction (Rocks/RockMesh seulement) : rochers moyens 0,60-1,40 x clamp(rug/0,15 ; 0,8 ; 2,0)
+  plafonnes a 1,29 (sous le seuil de collision 1,3) ; pierraille 10-25 cm a 20 faces ;
+  ombre de contact ; gros blocs inchanges en taille. Placement et comptes identiques au bit.
+- Pierrier -120,10 : 0,386 % -> 1,313 % de pixels, taches > 100 px 4 -> 27 ; la cible de 2 %
+  n'est PAS atteinte (il manque de la densite pres du joueur). Pied de barre : inchange.
+- Cout Release pierrier : rochers 0,46 -> 0,75 ms (GPU), 273 img/s. Tests 4000/4000,
+  0 `[Validation]`, A-J vert.
+- PIEGE : `FETCHCONTENT_BASE_DIR = external` -> dossiers binaires GLFW/GLM partages entre
+  builds ; un build Release ecrase le Debug. Builds valides : `build-agent0\` (Debug),
+  `build-release-p30\` (Release) ; `build\` et `build-release\` sont perimes.
+
+## PHASE 31 (2026-10-12) - builds separes, densite des rochers, demo candidate (detail : NOTES-PHASE31.md)
+
+- PERF : chiffres UHD 770 en 1280x720, INDICATIFS. Aucune conclusion ; a remesurer sur la
+  GTX 1660 Super en 1440p.
+- CMake : `FETCHCONTENT_BASE_DIR = ${CMAKE_BINARY_DIR}/_deps` ; sources dans
+  `external\*-src` via `FETCHCONTENT_SOURCE_DIR_<NOM>`. Debug (`build-agent0\`) et Release
+  (`build-release-p30\`) independants (verifie au bit). `external\*-build` et `-subbuild`
+  sont devenus inutiles.
+- Rochers : emplacements de PROXIMITE sous le meme masque (moyens +60 par cellule de 32 m,
+  portee 60 m ; pierraille +24 par cellule de 8 m, portee 26 m) ; aucun gros bloc ajoute,
+  collision identique ; plafond par bloc 1 792 / 1 024. Pierrier -120,10 : 1,3 -> 6,9 %
+  de pixels (6,1 % a 5 h 48, soleil rasant). Pied de barre : 0 gain, le masque n'y couvre
+  que 2,2 % du sol a < 10 m. Tests 4029, A-J vert, 0 `[Validation]`.
+- Lecon : un test d'anisotropie passait avec une densite ajoutee SANS trainees ; deux tests
+  ajoutes (contraste >= 3, rien la ou la trainee est nulle).
+- Demo : `dist\VercoraDemo-candidate(.zip)` = 110,7 Mio, avec les 4 cartes de couvert et
+  `precip.*.spv` ; teste depuis I: et OK. `dist\VercoraDemo` NON remplace (decision
+  utilisateur). `deploy_beta_to_desktop.ps1` est a revoir.

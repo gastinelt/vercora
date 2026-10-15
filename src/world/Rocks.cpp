@@ -70,6 +70,21 @@ Rocks::Rocks(const HeightSampler& terrain, const HeightSampler* cover, float ter
         params_.gravelDistanceNear > params_.gravelDistanceFar) {
         throw std::runtime_error("Rocks : portee proche au-dela de la portee lointaine.");
     }
+    // PHASE 31 : les emplacements de proximite restent EN DECA des portees
+    // d'origine (sinon ce ne serait plus de la proximite), et le plafond par
+    // bloc ne peut jamais retirer une instance d'origine.
+    if (params_.stoneNearDistanceNear > params_.stoneNearDistanceFar ||
+        params_.gravelNearDistanceNear > params_.gravelNearDistanceFar ||
+        params_.stoneNearDistanceFar > params_.stoneDistanceNear ||
+        params_.gravelNearDistanceFar > params_.gravelDistanceNear ||
+        params_.nearFadeStart <= 0.0f || params_.nearFadeStart >= 1.0f) {
+        throw std::runtime_error("Rocks : portees de proximite incoherentes.");
+    }
+    const auto cells = static_cast<uint32_t>(kBlockCells * kBlockCells);
+    if (params_.blockInstanceCap < cells * (params_.boulderSlots + params_.stoneSlots) ||
+        params_.gravelInstanceCap < cells * params_.gravelSlots) {
+        throw std::runtime_error("Rocks : plafond par bloc sous le maximum des emplacements d'origine.");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -174,12 +189,14 @@ float Rocks::streakDensityAt(float worldX, float worldZ) const {
 void Rocks::fitBox(Cell& cell, float baseX, float baseZ, float size) const {
     float minY = 0.0f, maxY = 0.0f;
     bool first = true;
-    for (const RockInstance& r : cell.rocks) {
-        const float lo = r.position.y - kRockBuriedDepth * r.scale;
-        const float hi = r.position.y + (kRockVisibleHeight + 0.3f) * r.scale;
-        minY = first ? lo : std::min(minY, lo);
-        maxY = first ? hi : std::max(maxY, hi);
-        first = false;
+    for (const std::vector<RockInstance>* list : { &cell.rocks, &cell.nearRocks }) {
+        for (const RockInstance& r : *list) {
+            const float lo = r.position.y - kRockBuriedDepth * r.scale;
+            const float hi = r.position.y + (kRockVisibleHeight + 0.3f) * r.scale;
+            minY = first ? lo : std::min(minY, lo);
+            maxY = first ? hi : std::max(maxY, hi);
+            first = false;
+        }
     }
     if (first) {
         minY = maxY = terrain_.heightAt(baseX + 0.5f * size, baseZ + 0.5f * size);
@@ -190,8 +207,8 @@ void Rocks::fitBox(Cell& cell, float baseX, float baseZ, float size) const {
 }
 
 bool Rocks::makeCandidate(float x, float z, RockKind kind, uint32_t slot, uint32_t slots,
-                          uint32_t hSize, uint32_t hYaw, uint32_t hTint,
-                          RockInstance& out) const {
+                          uint32_t hSize, uint32_t hYaw, uint32_t hTint, float roughness,
+                          RockInstance& out, bool nearSlot) const {
     float sizeMin = 0.0f, sizeMax = 0.0f, far = 0.0f, near = 0.0f;
     switch (kind) {
     case RockKind::Boulder:
@@ -207,16 +224,59 @@ bool Rocks::makeCandidate(float x, float z, RockKind kind, uint32_t slot, uint32
         far = params_.gravelDistanceFar; near = params_.gravelDistanceNear;
         break;
     }
+    if (nearSlot) {
+        // PHASE 31 : seule la PORTEE change ; taille, orientation, teinte et
+        // assise suivent exactement la loi de la classe.
+        if (kind == RockKind::Gravel) {
+            far = params_.gravelNearDistanceFar; near = params_.gravelNearDistanceNear;
+        } else {
+            far = params_.stoneNearDistanceFar; near = params_.stoneNearDistanceNear;
+        }
+    }
+    out.nearSlot = nearSlot;
     const glm::vec2 gradient = walkTerrainGradient(terrain_, x, z, slopeProbe_.params().slopeSampleStep);
     out.kind = kind;
     out.position = { x, terrain_.heightAt(x, z), z };
     // Taille : loi en carre, les petits sujets dominent comme dans un vrai eboulis.
     const float s = unitFloat(hSize);
     out.scale = sizeMin + (sizeMax - sizeMin) * s * s;
+    if (kind == RockKind::Stone) {
+        // PHASE 30 (Agent B) : un rocher moyen grossit avec la rugosite du DTM au
+        // point (facteur borne, sans tirage : le hachage `hSize` reste le seul
+        // alea de taille, et rien de ce qui decide la PRESENCE n'est touche).
+        // Plafond sous collideMinScale : voir RockParams::stoneSizeCap.
+        out.scale = std::min(out.scale * rockRoughnessScale(roughness, params_), params_.stoneSizeCap);
+    }
     out.yaw = unitFloat(hYaw) * kTwoPi;
     out.variation = packRockVariation(unitFloat(hTint), gradient * params_.tiltFollow);
     const float t = slots > 1 ? static_cast<float>(slot) / static_cast<float>(slots - 1) : 0.0f;
     out.maxDistance = glm::mix(far, near, t);
+    if (kind == RockKind::Gravel) {
+        // PHASE 30 (Agent B) : ASSISE de la plaque. Une plaque est un plan RIGIDE
+        // (incline par le gradient encode, a 85 %) ; le DTM au pas de 1 m, lui,
+        // se courbe sous un disque de 1 a 2 m. Mesure sur le DTM reel
+        // (build-phase30gentB\outilserif.cpp) : 3,2 % des cailloux de la
+        // Phase 29 avaient leur point bas AU-DESSUS du sol, jusqu'a 0,3 m. On
+        // sonde le sol sur deux anneaux du disque des cailloux et on ENFONCE la
+        // plaque de l'ecart maximal plan - sol. x et z ne bougent pas ; seul y
+        // descend, de quelques cm la ou le sol est convexe. Le plus petit caillou
+        // a deja 0,45 demi-hauteur (>= 0,027 x echelle) enfouie sous le plan,
+        // apres ses coupes : on ne compense que l'ecart AU-DELA de cette marge
+        // (kGravelBuriedMargin), sinon on enterrerait aussi tout ce qui depassait.
+        constexpr float kGravelBuriedMargin = 0.025f;
+        const glm::vec2 plane = unpackRockGradient(out.variation); // pente reelle du plan
+        float sink = 0.0f;
+        for (const float ring : { 0.22f, 0.44f }) {
+            const float radius = ring * out.scale;
+            for (int i = 0; i < 8; ++i) {
+                const float a = static_cast<float>(i) * (kTwoPi / 8.0f);
+                const float ox = radius * std::cos(a), oz = radius * std::sin(a);
+                const float planeY = out.position.y + plane.x * ox + plane.y * oz;
+                sink = std::max(sink, planeY - terrain_.heightAt(x + ox, z + oz));
+            }
+        }
+        out.position.y -= std::max(0.0f, sink - kGravelBuriedMargin * out.scale);
+    }
     return true;
 }
 
@@ -241,13 +301,36 @@ Rocks::Cell Rocks::buildBlockCell(int32_t cx, int32_t cz) const {
             const float allowed = streakDensityAt(x, z) * static_cast<float>(kindSlots);
             if (static_cast<float>(kindSlot) >= allowed) { continue; }
             // 3. Choix du mesh par la rugosite : les blocs ne vont que sur le rugueux.
-            if (roughnessAt(x, z) < params_.roughBlocks) { continue; }
+            const float roughness = roughnessAt(x, z);
+            if (roughness < params_.roughBlocks) { continue; }
             RockInstance r;
             makeCandidate(x, z, boulder ? RockKind::Boulder : RockKind::Stone, kindSlot,
                           kindSlots, cellHash(cx, cz, params_.seed, stream + 2u),
                           cellHash(cx, cz, params_.seed, stream + 3u),
-                          cellHash(cx, cz, params_.seed, stream + 4u), r);
+                          cellHash(cx, cz, params_.seed, stream + 4u), roughness, r);
             cell.rocks.push_back(r);
+        }
+        // PHASE 31 : emplacements de PROXIMITE, rochers moyens seulement (jamais
+        // de gros bloc : l'ensemble des blocs solides ne change pas). Memes trois
+        // filtres, dans le meme ordre ; flux disjoints (>= 6000, les flux
+        // d'origine s'arretent a 439) et graine distincte pour le rang.
+        const uint32_t nearSlots = params_.stoneNearSlots;
+        const uint32_t nearSeed = params_.seed ^ 0x3C6EF372u;
+        for (uint32_t slot = 0; slot < nearSlots; ++slot) {
+            const uint32_t stream = slot * 5u + 6000u;
+            const float x = baseX + unitFloat(cellHash(cx, cz, nearSeed, stream)) * size;
+            const float z = baseZ + unitFloat(cellHash(cx, cz, nearSeed, stream + 1u)) * size;
+            if (!maskAt(x, z)) { continue; }
+            const float allowed = streakDensityAt(x, z) * static_cast<float>(nearSlots);
+            if (static_cast<float>(slot) >= allowed) { continue; }
+            const float roughness = roughnessAt(x, z);
+            if (roughness < params_.roughBlocks) { continue; }
+            RockInstance r;
+            makeCandidate(x, z, RockKind::Stone, slot, nearSlots,
+                          cellHash(cx, cz, nearSeed, stream + 2u), cellHash(cx, cz, nearSeed, stream + 3u),
+                          cellHash(cx, cz, nearSeed, stream + 4u), roughness, r, true);
+            r.rank = cellHash(cx, cz, nearSeed ^ 0xB5297A4Du, stream);
+            cell.nearRocks.push_back(r);
         }
     }
     fitBox(cell, baseX, baseZ, size);
@@ -281,19 +364,59 @@ Rocks::Cell Rocks::buildGravelCell(int32_t cx, int32_t cz) const {
             RockInstance r;
             makeCandidate(x, z, RockKind::Gravel, slot, params_.gravelSlots,
                           cellHash(cx, cz, seed, stream + 2u), cellHash(cx, cz, seed, stream + 3u),
-                          cellHash(cx, cz, seed, stream + 4u), r);
+                          cellHash(cx, cz, seed, stream + 4u), 0.0f, r);
             cell.rocks.push_back(r);
+        }
+        // PHASE 31 : emplacements de PROXIMITE de la pierraille. Meme masque,
+        // memes trainees, meme decision de rugosite (au centre de la cellule,
+        // la MEME valeur que ci-dessus : une cellule rugueuse reste aux blocs).
+        const uint32_t nearSlots = params_.gravelNearSlots;
+        const uint32_t nearSeed = seed ^ 0x3C6EF372u;
+        for (uint32_t slot = 0; slot < nearSlots && !(roughKnown && rough); ++slot) {
+            const uint32_t stream = slot * 5u + 5000u;
+            const float x = baseX + unitFloat(cellHash(cx, cz, nearSeed, stream)) * size;
+            const float z = baseZ + unitFloat(cellHash(cx, cz, nearSeed, stream + 1u)) * size;
+            if (!maskAt(x, z)) { continue; }
+            const float allowed = streakDensityAt(x, z) * static_cast<float>(nearSlots);
+            if (static_cast<float>(slot) >= allowed) { continue; }
+            if (!roughKnown) {
+                rough = roughnessAt(baseX + 0.5f * size, baseZ + 0.5f * size) >= params_.roughBlocks;
+                roughKnown = true;
+            }
+            if (rough) { break; }
+            RockInstance r;
+            makeCandidate(x, z, RockKind::Gravel, slot, nearSlots,
+                          cellHash(cx, cz, nearSeed, stream + 2u), cellHash(cx, cz, nearSeed, stream + 3u),
+                          cellHash(cx, cz, nearSeed, stream + 4u), 0.0f, r, true);
+            r.rank = cellHash(cx, cz, nearSeed ^ 0xB5297A4Du, stream);
+            cell.nearRocks.push_back(r);
         }
     }
     fitBox(cell, baseX, baseZ, size);
     return cell;
 }
 
+namespace {
+std::vector<RockInstance> concatenated(const std::vector<RockInstance>& a, const std::vector<RockInstance>& b) {
+    std::vector<RockInstance> out;
+    out.reserve(a.size() + b.size());
+    out.insert(out.end(), a.begin(), a.end());
+    out.insert(out.end(), b.begin(), b.end());
+    return out;
+}
+} // namespace
+
 std::vector<RockInstance> Rocks::blockCellRocks(int32_t cx, int32_t cz) const {
-    return buildBlockCell(cx, cz).rocks;
+    const Cell cell = buildBlockCell(cx, cz);
+    return concatenated(cell.rocks, cell.nearRocks);
 }
 std::vector<RockInstance> Rocks::gravelCellRocks(int32_t cx, int32_t cz) const {
-    return buildGravelCell(cx, cz).rocks;
+    const Cell cell = buildGravelCell(cx, cz);
+    return concatenated(cell.rocks, cell.nearRocks);
+}
+std::vector<RockInstance> Rocks::blockRocks(int32_t bx, int32_t bz, bool gravelGrid) const {
+    const Cell block = buildBlock(bx, bz, gravelGrid);
+    return concatenated(block.rocks, block.nearRocks);
 }
 
 Rocks::Cell Rocks::buildBlock(int32_t bx, int32_t bz, bool gravelGrid) const {
@@ -307,12 +430,37 @@ Rocks::Cell Rocks::buildBlock(int32_t bx, int32_t bz, bool gravelGrid) const {
         for (int32_t i = 0; i < kBlockCells; ++i) {
             const int32_t cx = bx * kBlockCells + i, cz = bz * kBlockCells + j;
             const Cell cell = gravelGrid ? buildGravelCell(cx, cz) : buildBlockCell(cx, cz);
-            if (cell.rocks.empty()) { continue; }
+            if (cell.rocks.empty() && cell.nearRocks.empty()) { continue; }
             block.boxMin = first ? cell.boxMin : glm::min(block.boxMin, cell.boxMin);
             block.boxMax = first ? cell.boxMax : glm::max(block.boxMax, cell.boxMax);
             first = false;
             block.rocks.insert(block.rocks.end(), cell.rocks.begin(), cell.rocks.end());
+            block.nearRocks.insert(block.nearRocks.end(), cell.nearRocks.begin(), cell.nearRocks.end());
         }
+    }
+    // PHASE 31 : PLAFOND d'instances par bloc. Seules les instances de
+    // proximite sont eclaircies, en gardant les `rank` les plus petits : un
+    // tirage uniforme (pas un decoupage par cellule ou par emplacement, qui
+    // ferait des trous ou casserait le LOD), et independant de l'ordre dans
+    // lequel les blocs sont semes (le bloc est une fonction pure de (bx, bz)).
+    // Egalites de rang departagees par l'indice : resultat total et
+    // deterministe. Les instances d'origine ne sont jamais touchees (le
+    // constructeur garantit cap >= leur maximum).
+    const uint32_t cap = gravelGrid ? params_.gravelInstanceCap : params_.blockInstanceCap;
+    const std::size_t room = cap > block.rocks.size() ? cap - block.rocks.size() : 0;
+    if (block.nearRocks.size() > room) {
+        std::vector<uint32_t> order(block.nearRocks.size());
+        for (uint32_t i = 0; i < order.size(); ++i) { order[i] = i; }
+        std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+            const uint32_t ra = block.nearRocks[a].rank, rb = block.nearRocks[b].rank;
+            return ra != rb ? ra < rb : a < b;
+        });
+        order.resize(room);
+        std::sort(order.begin(), order.end());
+        std::vector<RockInstance> kept;
+        kept.reserve(room);
+        for (const uint32_t i : order) { kept.push_back(block.nearRocks[i]); }
+        block.nearRocks.swap(kept);
     }
     return block;
 }
@@ -346,6 +494,7 @@ void Rocks::gatherGrid(const glm::vec3& eye, const Frustum& frustum, bool gravel
     const float cellSize = gravelGrid ? params_.gravelCell : params_.blockCell;
     const float reach = gravelGrid ? params_.gravelDistanceFar
                                    : std::max(params_.boulderDistanceFar, params_.stoneDistanceFar);
+    const float nearReach = gravelGrid ? params_.gravelNearDistanceFar : params_.stoneNearDistanceFar;
     const uint32_t budget = gravelGrid ? params_.gravelCellBudget : params_.blockCellBudget;
     Cache& cache = gravelGrid ? gravelCache_ : blockCache_;
     const float blockSize = static_cast<float>(kBlockCells) * cellSize;
@@ -385,21 +534,32 @@ void Rocks::gatherGrid(const glm::vec3& eye, const Frustum& frustum, bool gravel
                 found = cache.emplace(CellKey{ bx, bz }, buildBlock(bx, bz, gravelGrid)).first;
             }
             const Cell& block = found->second;
-            if (block.rocks.empty() || !frustum.intersectsAABB(block.boxMin, block.boxMax)) {
+            if ((block.rocks.empty() && block.nearRocks.empty()) ||
+                !frustum.intersectsAABB(block.boxMin, block.boxMax)) {
                 continue;
             }
-            for (const RockInstance& r : block.rocks) {
-                const glm::vec3 d = eye - r.position;
-                const float d2 = glm::dot(d, d);
-                if (d2 >= r.maxDistance * r.maxDistance) { continue; }
-                const float distance = std::sqrt(d2);
-                InstanceData instance;
-                instance.position = r.position;
-                instance.scale = r.scale;
-                instance.yaw = r.yaw;
-                instance.variation = r.variation;
-                instance.fade = 1.0f - ramp(distance, 0.82f * r.maxDistance, r.maxDistance);
-                outs[static_cast<int>(r.kind)]->push_back(instance);
+            const auto emit = [&](const std::vector<RockInstance>& list, float fadeStart) {
+                for (const RockInstance& r : list) {
+                    const glm::vec3 d = eye - r.position;
+                    const float d2 = glm::dot(d, d);
+                    if (d2 >= r.maxDistance * r.maxDistance) { continue; }
+                    const float distance = std::sqrt(d2);
+                    InstanceData instance;
+                    instance.position = r.position;
+                    instance.scale = r.scale;
+                    instance.yaw = r.yaw;
+                    instance.variation = r.variation;
+                    instance.fade = 1.0f - ramp(distance, fadeStart * r.maxDistance, r.maxDistance);
+                    instance.position.y -= rockFadeSink(r.kind, r.scale, instance.fade);
+                    outs[static_cast<int>(r.kind)]->push_back(instance);
+                }
+            };
+            emit(block.rocks, 0.82f);
+            // PHASE 31 : les emplacements de proximite ne sont meme pas parcourus
+            // quand le bloc est hors de leur portee (distance horizontale au bloc,
+            // qui minore la distance 3D) : aucun surcout lointain.
+            if (!block.nearRocks.empty() && bdx * bdx + bdz * bdz < nearReach * nearReach) {
+                emit(block.nearRocks, params_.nearFadeStart);
             }
         }
     }
