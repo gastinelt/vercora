@@ -28,13 +28,21 @@ MONDE - une partie normale les charge, les dessine et s'y cogne. Suite du
 
 Ce bloc complete celui de la Phase 20 ci-dessous, qui reste vrai sauf mention.
 
+- **Fusion du 2026-10-15** (branche `fusion/phases-30-32`) : phases 30-31 du PC
+  (rochers) + optimisation du cloud, renumerotee Phase 32. Verifie sous Windows
+  (build Debug neuf `build-fusion\`, VS 18 + Ninja) : 0 erreur, **4 049 / 4 049**
+  verifications headless (4 029 du PC + 20 du cloud), demarrage `--quit-after=8`
+  sur l'UHD 770 propre, 0 `[Validation]`. Correctif Windows : le test .vcto
+  supprimait son fichier encore ouvert (permis sous Linux seulement).
+  NON verifie : rendu/visuel des rochers avec le pool GPU et l'early-Z
+  (le demarrage par defaut n'a pas de carte de couvert, donc aucun rocher).
 - **Builds** : Windows inchange (`tools\build.bat`, `tools\run_logic_tests.bat`).
   **Linux** depuis la Phase 32 : `cmake -S . -B build-rel -G Ninja
   -DCMAKE_BUILD_TYPE=Release -DGLFW_BUILD_WAYLAND=OFF && ninja -C build-rel`
   (GCC 13 / Clang 18). Les tests headless se compilent avec la meme liste de
   sources que `run_logic_tests.bat`.
-- **Tests headless** : 3 963 verifications sans les dalles LiDAR (25 de plus
-  avec elles). +20 en Phase 32 (formats GPU, allocateur, orthophoto par tranches).
+- **Tests headless** : 4 049 sur le PC (avec les dalles LiDAR) ; 3 963 cote
+  cloud avant fusion (sans dalles ni rochers 30-31). +20 en Phase 32 (formats GPU, allocateur, orthophoto par tranches).
 - **Ressources** : chaque partie journalise `Ressources (PHASE 32)` au
   chargement, toutes les 10 s et a la fermeture : RAM du processus, memoire GPU
   exacte (toute allocation passe par `VulkanContext::allocateMemory`), blocs et
