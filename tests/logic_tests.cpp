@@ -3253,6 +3253,10 @@ void testTextureFile() {
         }
         check(whole == payload && banded == payload,
               "Phase 32 : lecture directe et lecture par tranches = memes octets");
+        // Fermer AVANT de supprimer : sous Windows, un fichier encore ouvert ne
+        // peut pas etre supprime et std::filesystem::remove LEVE (le test,
+        // ecrit sous Linux ou c'est permis, faisait avorter logic_tests.exe).
+        in.close();
         std::filesystem::remove(path);
     }
 }
