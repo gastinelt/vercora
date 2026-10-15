@@ -38,4 +38,23 @@ inline constexpr float kRockVisibleHeight   = 0.70f; // bloc et rocher
 inline constexpr float kRockBuriedDepth     = 0.25f;
 inline constexpr float kRockFootprintRadius = 0.50f;
 
+// PHASE 30 (Agent B) : OMBRE DE CONTACT cuite dans la couleur de sommet. Le
+// moteur n'a pas d'ombre portee ; sans elle un bloc pose sur un sol clair n'a
+// pas de pied et semble colle a plat. Facteur x kRockContactShade au niveau du
+// sol (y <= 0), remontant en smoothstep jusqu'a x1 a kRockContactHeight du
+// sommet visible de la piece (`top`, repere du mesh). Aucune modification du
+// shader : foliage.vert transmet deja la couleur de sommet.
+inline constexpr float kRockContactShade  = 0.55f;
+inline constexpr float kRockContactHeight = 0.40f;
+inline float rockContactShade(float y, float top) {
+    const float h = kRockContactHeight * top;
+    if (h <= 0.0f) {
+        return 1.0f;
+    }
+    float t = y / h;
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    const float smooth = t * t * (3.0f - 2.0f * t);
+    return kRockContactShade + (1.0f - kRockContactShade) * smooth;
+}
+
 } // namespace vercora

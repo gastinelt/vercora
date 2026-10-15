@@ -51,8 +51,26 @@ struct RockParams {
     float blockCell = 32.0f;
     uint32_t boulderSlots = 8; // au plus 8 gros blocs / 1024 m2 (1 / 128 m2)
     uint32_t stoneSlots = 20;  // au plus 20 rochers moyens / 1024 m2
+    // Gros blocs : loi de taille de la Phase 29, INCHANGEE en Phase 30. C'est
+    // elle qui porte la collision (collideMinScale, rayon x echelle) : la garder
+    // telle quelle garantit une collision identique au bit pres.
     float boulderSizeMin = 1.1f, boulderSizeMax = 2.6f; // echelle (m)
-    float stoneSizeMin = 0.35f, stoneSizeMax = 0.95f;
+    // PHASE 30 (Agent B) : rochers moyens 0,35-0,95 -> 0,6-1,4, puis x le
+    // facteur de rugosite (voir rockRoughnessScale) et plafonnes a stoneSizeCap.
+    // Mesure (build-phase30gentA\DIAGNOSTIC.md) : a 0,36 m hors sol ils
+    // n'apportaient que 2 % des pixels de rochers, 3 px de mediane a 35 m.
+    float stoneSizeMin = 0.60f, stoneSizeMax = 1.40f;
+    // Plafond STRICTEMENT sous collideMinScale : un rocher moyen n'a pas de
+    // collision ; il ne doit donc jamais atteindre la taille d'un gros bloc qui
+    // en a une (sinon on traverserait un bloc d'aspect bloquant).
+    float stoneSizeCap = 1.29f;
+    // PHASE 30 : facteur de taille = clamp(rugosite / ref, min, max). Un DTM de
+    // 0,10 m RMS ne porte pas de blocs de 2 m ; une zone a 0,30 m RMS, si. Ne
+    // s'applique qu'aux rochers MOYENS (les gros blocs gardent leur loi, voir
+    // plus haut). Mediane de la rugosite au pied des rochers : 0,16-0,18 m,
+    // donc un facteur median ~1,1.
+    float roughScaleRef = 0.15f;
+    float roughScaleMin = 0.80f, roughScaleMax = 2.00f;
     float boulderDistanceFar = 700.0f, boulderDistanceNear = 350.0f;
     float stoneDistanceFar = 320.0f, stoneDistanceNear = 140.0f;
 
@@ -76,6 +94,41 @@ struct RockParams {
     // de la pente est lue au centre de chaque tuile de 96 m.
     float streakTile = 96.0f;
 
+    // --- PHASE 31 (Agent 2) : emplacements de PROXIMITE ---------------------
+    // Mesure (build-phase30\agentA\DIAGNOSTIC.md, NOTES-PHASE30.md) : le premier
+    // plan (0-15 m) n'avait AUCUN rocher, faute de densite. On ajoute, dans les
+    // MEMES cellules et sous le MEME masque (pente, couvert, rugosite -> classe,
+    // trainees), des emplacements supplementaires a PORTEE COURTE : c'est le LOD
+    // de densite existant (chaque emplacement a sa portee) prolonge vers le
+    // joueur. Au-dela de stone/gravelNearDistanceFar ils ne sont ni parcourus
+    // ni dessines : aucun surcout lointain.
+    //  - rochers moyens seulement (jamais de gros bloc : la collision ne change
+    //    pas), meme loi de taille, donc plafonnes a stoneSizeCap < 1,3 ;
+    //  - pierraille : memes plaques.
+    // Flux de hachage DISJOINTS de ceux de la Phase 29/30 : les instances
+    // d'origine sont identiques au bit (empreinte dans les tests).
+    // Valeurs MESUREES (build-phase31\agent2\RAPPORT.md) : 40 emplacements a
+    // 48 m ou 60 a 80 m donnent le meme gain d'image au pierrier (6,87 / 6,93 %
+    // de pixels) ; on garde 60 emplacements (densite proche) sur 60 m.
+    uint32_t stoneNearSlots = 60;  // en plus des 20 : au plus 80 rochers / 1024 m2 pres du joueur
+    float stoneNearDistanceFar = 60.0f, stoneNearDistanceNear = 18.0f;
+    uint32_t gravelNearSlots = 24; // en plus des 12 : au plus 36 plaques / 64 m2 pres du joueur
+    float gravelNearDistanceFar = 26.0f, gravelNearDistanceNear = 12.0f;
+    // Fondu par retrecissement des emplacements de proximite : sur les 40 %
+    // derniers de leur portee (0,82 -> 1 pour les autres). Portees courtes,
+    // donc bande plus large en proportion : une plaque ne doit pas "pousser"
+    // en 2 m de marche.
+    float nearFadeStart = 0.60f;
+    // PLAFOND d'instances par BLOC de cache (8 x 8 cellules), toutes classes.
+    // Seules les instances de PROXIMITE sont eclaircies pour tenir dessous
+    // (tirage `rank` uniforme, independant de l'ordre) : les instances
+    // d'origine, gros blocs compris, ne sont JAMAIS retirees. Le constructeur
+    // refuse un plafond sous le maximum d'origine (64 x emplacements d'origine).
+    // Sans plafond, le pire cas theorique serait 64 x 88 = 5 632 (blocs) et
+    // 64 x 36 = 2 304 (pierraille). Mesure sur la zone : max 1 080 et 1 315.
+    uint32_t blockInstanceCap = 1792;  // = maximum d'origine 64 x 28 (le plafond le plus bas permis)
+    uint32_t gravelInstanceCap = 1024; // origine : au plus 64 x 12 = 768
+
     // Part de la pente suivie par l'inclinaison du rocher (1 = normale au sol).
     float tiltFollow = 0.85f;
 
@@ -94,6 +147,28 @@ struct RockParams {
 };
 
 enum class RockKind : uint8_t { Boulder = 0, Stone = 1, Gravel = 2 };
+
+// PHASE 30 (Agent B) : facteur de taille des rochers moyens selon la rugosite
+// locale du DTM (m). Borne, monotone, sans alea : il ne consomme AUCUN tirage du
+// hachage, donc ne change ni la presence ni la position d'aucun rocher.
+inline float rockRoughnessScale(float roughness, const RockParams& p) {
+    const float k = roughness / p.roughScaleRef;
+    return std::fmin(std::fmax(k, p.roughScaleMin), p.roughScaleMax);
+}
+
+// PHASE 31 (Agent 2) : ENFONCEMENT d'une plaque de pierraille pendant son fondu
+// (m, a retrancher a y). Le fondu retrecit la plaque vers son origine ; l'assise
+// (Rocks::makeCandidate) n'est sondee qu'a pleine echelle, sur deux anneaux. Mesure
+// (sonde, 150 m autour des deux sites) : a 30 % d'echelle, 1 a 4 cailloux sur des
+// dizaines de milliers ont leur point bas jusqu'a 1 cm AU-DESSUS du sol - defaut
+// anterieur a la Phase 31, plus frequent avec la densite. On enfonce donc la plaque
+// de 4 cm x echelle x (1 - fondu) : nul a pleine echelle (assise inchangee), et
+// la plaque s'enterre en meme temps qu'elle rapetisse. Blocs et rochers : 0 (pied
+// au sol, ils ne flottent a aucune echelle, mesure).
+constexpr float kGravelFadeSink = 0.04f;
+inline float rockFadeSink(RockKind kind, float scale, float fade) {
+    return kind == RockKind::Gravel ? kGravelFadeSink * scale * (1.0f - fade) : 0.0f;
+}
 
 // Encodage de l'inclinaison dans InstanceData::variation (voir shaders/
 // foliage.vert, mode rocher = params.w < 0). La struct d'instance est pleine
@@ -124,6 +199,10 @@ struct RockInstance {
     float variation = 0.0f;   // deja encode (packRockVariation)
     float maxDistance = 0.0f; // portee propre a l'emplacement (LOD de densite)
     RockKind kind = RockKind::Gravel;
+    // PHASE 31 : emplacement de PROXIMITE (portee courte, fondu large, eclairci
+    // par le plafond du bloc selon `rank`). false = emplacement d'origine.
+    bool nearSlot = false;
+    uint32_t rank = 0;
 };
 
 class Rocks : public CollisionSolver {
@@ -145,9 +224,15 @@ public:
     float roughnessAt(float worldX, float worldZ) const; // m
     float streakDensityAt(float worldX, float worldZ) const; // [0,1]
 
-    // Tous les candidats RETENUS par le semis d'une cellule (tests).
+    // Tous les candidats RETENUS par le semis d'une cellule (tests) : origine
+    // puis proximite, AVANT le plafond par bloc.
     std::vector<RockInstance> blockCellRocks(int32_t cx, int32_t cz) const;
     std::vector<RockInstance> gravelCellRocks(int32_t cx, int32_t cz) const;
+    // PHASE 31 : contenu d'un BLOC de cache (kBlockCells x kBlockCells
+    // cellules), APRES le plafond - exactement ce que gather et la collision
+    // lisent. Construit a neuf (fonction pure du bloc ; tests, diagnostic).
+    std::vector<RockInstance> blockRocks(int32_t bx, int32_t bz, bool gravelGrid) const;
+    static constexpr int32_t kBlockCells = 8;
 
     // Estimation sur toute la zone (une cellule de blocs sur `step`) : part de
     // la surface sous masque et nombre de rochers par hectare de masque.
@@ -182,7 +267,8 @@ private:
         }
     };
     struct Cell {
-        std::vector<RockInstance> rocks;
+        std::vector<RockInstance> rocks;     // emplacements d'origine (Phase 29/30)
+        std::vector<RockInstance> nearRocks; // PHASE 31 : emplacements de proximite
         glm::vec3 boxMin{0.0f}, boxMax{0.0f};
     };
     using Cache = std::unordered_map<CellKey, Cell, CellKeyHash>;
@@ -190,7 +276,6 @@ private:
     Cell buildBlockCell(int32_t cx, int32_t cz) const;
     Cell buildGravelCell(int32_t cx, int32_t cz) const;
     // Cache par BLOC de kBlockCells x kBlockCells cellules (voir buildBlock).
-    static constexpr int32_t kBlockCells = 8;
     Cell buildBlock(int32_t bx, int32_t bz, bool gravelGrid) const;
     const Cell& cachedBlock(int32_t bx, int32_t bz, bool gravelGrid) const;
 
@@ -199,9 +284,12 @@ private:
                     std::vector<InstanceData>* outs[3]);
 
     // Candidat a (x, z) : filtre dur + construction. Renvoie false si rejete.
+    // `roughness` : rugosite deja calculee au point par le semis (blocs) ; sert
+    // a la taille des rochers moyens (PHASE 30), ignoree pour les autres types.
+    // `nearSlot` (PHASE 31) : portee tiree de stone/gravelNearDistance*.
     bool makeCandidate(float x, float z, RockKind kind, uint32_t slot, uint32_t slots,
-                       uint32_t hSize, uint32_t hYaw, uint32_t hTint,
-                       RockInstance& out) const;
+                       uint32_t hSize, uint32_t hYaw, uint32_t hTint, float roughness,
+                       RockInstance& out, bool nearSlot = false) const;
     float coverAt(float worldX, float worldZ) const;
     void fitBox(Cell& cell, float baseX, float baseZ, float size) const;
 
