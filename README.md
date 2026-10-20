@@ -6,7 +6,7 @@ parapente, escalade, faune, meteo, artisanat) sur une zone LiDAR reelle de
 
 Ce fichier est le demarrage rapide. L'etat du projet est dans `MEMORY.md`, le
 detail de chaque phase dans `NOTES-PHASE*.md` (la derniere : `NOTES-PHASE32.md`,
-optimisation des ressources).
+optimisation des ressources ; banc GPU GTX 1660 SUPER : `NOTES-BENCH-GTX1660S.md`).
 
 ## Construire
 

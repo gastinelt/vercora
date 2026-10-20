@@ -6,7 +6,7 @@ voir `NOTES-PHASE6.md`, `NOTES-PHASE7.md`, `NOTES-PHASE9.md`, `NOTES-PHASE10.md`
 `NOTES-PHASE-ESCALADE.md`, `NOTES-PHASE15.md`, `NOTES-PHASE16.md`,
 `NOTES-PHASE17.md`, `NOTES-PHASE18.md`, `NOTES-PHASE19.md`,
 `NOTES-PHASE20.md` a `NOTES-PHASE32.md` (plus `NOTES-PHASE28-DESIGN.md`,
-`NOTES-PHASE29-DESIGN.md`) et l'audit `NOTES-AUDIT-GLOBAL.md` ; ce fichier est
+`NOTES-PHASE29-DESIGN.md`), le banc GPU `NOTES-BENCH-GTX1660S.md` et l'audit `NOTES-AUDIT-GLOBAL.md` ; ce fichier est
 un resume vivant, mis a jour a la fin de chaque session, pas un journal complet.
 Le `README.md` a la racine donne le demarrage rapide (build, lancement, tests).
 
@@ -23,6 +23,28 @@ simplifie, chiffre et teste - mais plus aucune n'est vide.
 MONDE - une partie normale les charge, les dessine et s'y cogne. Suite du
 2026-08-23 : **F3/F4 selectionnent l'objet pose suivant/precedent SANS viser**
 (detail plus bas, section Phase 15).
+
+## Etat verifie (2026-10-20, banc NVIDIA GeForce GTX 1660 SUPER sur zone 25 km2)
+
+Ce bloc met a jour le profil materiel et les performances du moteur sur machine physique.
+Detail complet des mesures : `NOTES-BENCH-GTX1660S.md`.
+
+- **NOUVEAU GPU SUR CETTE MACHINE (2026-10-20) : NVIDIA GeForce GTX 1660 SUPER**
+  (6 Go GDDR6 dedies, Turing, pilote 32.0.16.1742) en plus de l'Intel UHD 770 integree.
+  Selectionnee automatiquement par le contexte Vulkan au demarrage.
+- **Bancs standardises Release (zone 25 km2, 30 s par scenario)** :
+  - **Survol express (900 m/s)** : **2 975.4 FPS** (336 us/image, `drawFrame` 165.6 us,
+    89 267 frames rendues, 3 812 tuiles construites, **0 trou de streaming**, VRAM 83.0 Mo).
+    Facteur de gain vs UHD 770 (378 FPS) : **x7.87 (+687 %)**.
+  - **Panorama sommet (vue lointaine)** : **1 034.9 FPS** (966 us/image, `drawFrame` 335.7 us,
+    4 144 arbres et 15 522 touffes d'herbe a l'ecran, VRAM 56.1 Mo).
+  - **Foret dense au sol (vegetation, rochers, faune)** : **1 308.3 FPS** (764 us/image,
+    `drawFrame` 163.9 us, 5 278 arbres, 12 214 herbes, 24 animaux, VRAM 55.7 Mo).
+- **Mesure et observation de Theo (regard vers le ciel aux 3/4)** : pic mesure a **5 448 FPS**
+  (~183 us/image). Ce resultat valide l'efficacite du Frustum Culling (arbres, herbe, rochers
+  et tuiles au sol instantanement rejetes par le quadtree/CPU) et l'absence totale de goulet
+  d'etranglement CPU dans la boucle Vulkan / C++20 (aucun appel `vkAllocateMemory` dynamique
+  grace au pool `GpuBufferPool` de la Phase 32).
 
 ## Etat verifie (2026-10-15, fin de Phase 32 ; fusion des branches PC et cloud)
 
