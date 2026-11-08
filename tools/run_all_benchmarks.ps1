@@ -1,4 +1,4 @@
-$root = "C:\Users\theog\Documents\_CODE\4-vercors\vercora"
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $runner = Join-Path $root "tools\bench_runner.ps1"
 
 $scenarios = @(

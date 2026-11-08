@@ -86,7 +86,7 @@ public class DesktopLauncher {
 
 Add-Type -TypeDefinition $code
 
-$root = "C:\Users\theog\Documents\_CODE\4-vercors\vercora"
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $exe = Join-Path $root "build\vercora.exe"
 $cmd = "`"$exe`" $GameArgs"
 

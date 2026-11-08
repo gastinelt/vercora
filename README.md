@@ -86,3 +86,10 @@ memoire GPU exacte, allocations Vulkan, pool de geometrie).
     shaders/      GLSL compiles en SPIR-V par CMake
     tools/        build, tests, harnais Vulkan, preparation des donnees
     tests/        tests headless de la logique de jeu
+
+## Donnees et licence
+
+- Relief et sol : **IGN - Programme LiDAR HD** (Licence Ouverte Etalab 2.0).
+  La texture du sol (`assets/terrain/vercora_zone_ortho.vcto`) est derivee de donnees IGN sous la meme licence.
+- Le placement des gisements dans le jeu est une approximation de gameplay, pas une carte geologique.
+- Code : aucune licence libre pour le moment, tous droits reserves (Theo Gastinel). Le depot est public pour etre lu, pas reutilise.

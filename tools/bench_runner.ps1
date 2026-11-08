@@ -4,7 +4,7 @@ param(
     [string]$TargetDesktop = "Bench Vercora"
 )
 
-$root = "C:\Users\theog\Documents\_CODE\4-vercors\vercora"
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $exe = Join-Path $root "build\vercora.exe"
 $vd = Join-Path $root "tools\VirtualDesktop.exe"
 $logPath = Join-Path $root $LogFile

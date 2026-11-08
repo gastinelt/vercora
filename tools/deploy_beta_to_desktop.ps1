@@ -1,4 +1,4 @@
-$dest = "C:\Users\theog\Desktop\Vercora.Beta"
+$dest = Join-Path ([Environment]::GetFolderPath("Desktop")) "Vercora.Beta"
 if (-not (Test-Path $dest)) {
     New-Item -ItemType Directory -Path $dest -Force | Out-Null
 }

@@ -121,3 +121,8 @@ id_ed25519*
 /external/glfw-src/
 /external/glm-src/
 /external/tinyobjloader-src/
+
+# Journaux de build et de lancement
+*.log
+build_log.txt
+build-*/
